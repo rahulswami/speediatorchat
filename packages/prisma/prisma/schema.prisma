@@ -1,0 +1,604 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  OWNER
+  ADMIN
+  AGENT
+}
+
+enum WebhookEventStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum ConversationStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  SNOOZED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum ContactImportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum TemplateStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAUSED
+  DISABLED
+}
+
+enum TemplateCategory {
+  MARKETING
+  UTILITY
+  AUTHENTICATION
+}
+
+// Phase 6
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  PAUSED
+  COMPLETED
+  FAILED
+}
+
+enum CampaignContactStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED_OPTED_OUT
+  SKIPPED_NO_SESSION
+}
+
+// Phase 7
+enum WorkflowStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum WorkflowExecutionStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// Phase 8
+enum SubscriptionPlan {
+  STARTER
+  GROWTH
+  SCALE
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  UNPAID
+}
+
+// Phase 9
+enum IntegrationType {
+  SHOPIFY
+  WOOCOMMERCE
+  RAZORPAY
+  SHIPROCKET
+  ZAPIER
+}
+
+// ─── Phase 1 ─────────────────────────────────────────────────────────────────
+
+model Organization {
+  id        String   @id @default(uuid())
+  slug      String   @unique
+  name      String
+  timezone  String   @default("Asia/Kolkata")
+  locale    String   @default("en")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members           OrganizationMember[]
+  invites           Invite[]
+  whatsappAccounts  WhatsappAccount[]
+  webhookEvents     WebhookEvent[]
+  contacts          Contact[]
+  conversations     Conversation[]
+  messages          Message[]
+  contactTags       ContactTag[]
+  contactAttributes ContactAttribute[]
+  contactImports    ContactImport[]
+  templates         Template[]
+  campaigns         Campaign[]
+  workflows         Workflow[]
+  subscription      Subscription?
+  usageRecords      UsageRecord[]
+  apiKeys           ApiKey[]
+  outboundWebhooks  OutboundWebhook[]
+  integrations      Integration[]
+
+  @@map("organizations")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships        OrganizationMember[]
+  sentInvites        Invite[]             @relation("InviteSender")
+  conversations      Conversation[]       @relation("AssignedAgent")
+  campaigns          Campaign[]
+  workflows          Workflow[]
+  workflowExecutions WorkflowExecution[]
+  apiKeys            ApiKey[]
+
+  @@map("users")
+}
+
+model OrganizationMember {
+  id             String   @id @default(uuid())
+  organizationId String
+  userId         String
+  role           Role     @default(AGENT)
+  invitedById    String?
+  joinedAt       DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@map("organization_members")
+}
+
+model Invite {
+  id             String    @id @default(uuid())
+  organizationId String
+  email          String
+  role           Role      @default(AGENT)
+  token          String    @unique @default(uuid())
+  invitedById    String
+  acceptedAt     DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation("InviteSender", fields: [invitedById], references: [id])
+
+  @@index([organizationId])
+  @@index([token])
+  @@map("invites")
+}
+
+// ─── Phase 2 ─────────────────────────────────────────────────────────────────
+
+model WhatsappAccount {
+  id             String   @id @default(uuid())
+  organizationId String
+  wabaId         String
+  phoneNumberId  String
+  displayName    String
+  encryptedToken String
+  iv             String
+  authTag        String
+  verifyToken    String   @unique @default(uuid())
+  verified       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  webhookEvents WebhookEvent[]
+  conversations Conversation[]
+  templates     Template[]
+  campaigns     Campaign[]
+
+  @@index([organizationId])
+  @@map("whatsapp_accounts")
+}
+
+model WebhookEvent {
+  id                String             @id @default(uuid())
+  organizationId    String
+  whatsappAccountId String?
+  metaMessageId     String?
+  payload           Json
+  status            WebhookEventStatus @default(PENDING)
+  retryCount        Int                @default(0)
+  processedAt       DateTime?
+  createdAt         DateTime           @default(now())
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  whatsappAccount WhatsappAccount? @relation(fields: [whatsappAccountId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([metaMessageId])
+  @@map("webhook_events")
+}
+
+// ─── Phase 3 ─────────────────────────────────────────────────────────────────
+
+model Contact {
+  id             String    @id @default(uuid())
+  organizationId String
+  phone          String
+  name           String?
+  avatarUrl      String?
+  optedIn        Boolean   @default(false)
+  optedInAt      DateTime?
+  optedOutAt     DateTime?
+  optedOut       Boolean   @default(false)
+  lastSeenAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization     Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  conversations    Conversation[]
+  tagMap           ContactTagMap[]
+  attributes       ContactAttribute[]
+  campaignContacts CampaignContact[]
+  executions       WorkflowExecution[]
+
+  @@unique([organizationId, phone])
+  @@index([organizationId])
+  @@map("contacts")
+}
+
+model Conversation {
+  id                String             @id @default(uuid())
+  organizationId    String
+  contactId         String
+  whatsappAccountId String
+  assignedTo        String?
+  status            ConversationStatus @default(OPEN)
+  lastMessageAt     DateTime?
+  sessionExpiresAt  DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact         Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  whatsappAccount WhatsappAccount @relation(fields: [whatsappAccountId], references: [id], onDelete: Cascade)
+  assignedAgent   User?           @relation("AssignedAgent", fields: [assignedTo], references: [id], onDelete: SetNull)
+  messages        Message[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@map("conversations")
+}
+
+model Message {
+  id             String           @id @default(uuid())
+  conversationId String
+  organizationId String
+  direction      MessageDirection
+  type           String           @default("text")
+  content        Json
+  metaMessageId  String?          @unique
+  status         MessageStatus    @default(PENDING)
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  createdAt      DateTime         @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([organizationId])
+  @@map("messages")
+}
+
+// ─── Phase 4 ─────────────────────────────────────────────────────────────────
+
+model ContactTag {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  color          String   @default("#6366f1")
+  createdAt      DateTime @default(now())
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contacts     ContactTagMap[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("contact_tags")
+}
+
+model ContactTagMap {
+  contactId String
+  tagId     String
+
+  contact Contact    @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag     ContactTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+  @@map("contact_tag_map")
+}
+
+model ContactAttribute {
+  id             String   @id @default(uuid())
+  contactId      String
+  organizationId String
+  key            String
+  value          String
+  createdAt      DateTime @default(now())
+
+  contact      Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, key])
+  @@index([organizationId])
+  @@map("contact_attributes")
+}
+
+model ContactImport {
+  id             String              @id @default(uuid())
+  organizationId String
+  filename       String
+  rowCount       Int                 @default(0)
+  status         ContactImportStatus @default(PENDING)
+  errorLog       Json?
+  createdAt      DateTime            @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("contact_imports")
+}
+
+// ─── Phase 5 ─────────────────────────────────────────────────────────────────
+
+model Template {
+  id                String           @id @default(uuid())
+  organizationId    String
+  whatsappAccountId String
+  metaTemplateId    String?
+  name              String
+  language          String           @default("en")
+  category          TemplateCategory
+  status            TemplateStatus   @default(PENDING)
+  components        Json
+  rejectionReason   String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  syncedAt          DateTime?
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  whatsappAccount WhatsappAccount @relation(fields: [whatsappAccountId], references: [id], onDelete: Cascade)
+  campaigns       Campaign[]
+
+  @@unique([organizationId, name, language])
+  @@index([organizationId])
+  @@map("templates")
+}
+
+// ─── Phase 6 ─────────────────────────────────────────────────────────────────
+
+model Campaign {
+  id                String         @id @default(uuid())
+  organizationId    String
+  whatsappAccountId String
+  templateId        String
+  createdBy         String
+  name              String
+  status            CampaignStatus @default(DRAFT)
+  audienceFilter    Json           @default("{}")
+  variableMap       Json           @default("{}")
+  scheduledAt       DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  whatsappAccount WhatsappAccount   @relation(fields: [whatsappAccountId], references: [id], onDelete: Cascade)
+  template        Template          @relation(fields: [templateId], references: [id])
+  createdByUser   User              @relation(fields: [createdBy], references: [id])
+  contacts        CampaignContact[]
+
+  @@index([organizationId])
+  @@map("campaigns")
+}
+
+model CampaignContact {
+  id         String                @id @default(uuid())
+  campaignId String
+  contactId  String
+  status     CampaignContactStatus @default(PENDING)
+  error      String?
+  sentAt     DateTime?
+  createdAt  DateTime              @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, contactId])
+  @@index([campaignId])
+  @@map("campaign_contacts")
+}
+
+// ─── Phase 7 ─────────────────────────────────────────────────────────────────
+
+model Workflow {
+  id             String        @id @default(uuid())
+  organizationId String
+  createdBy      String
+  name           String
+  triggerType    String
+  triggerConfig  Json          @default("{}")
+  nodes          Json          @default("[]")
+  edges          Json          @default("[]")
+  status         WorkflowStatus @default(DRAFT)
+  version        Int           @default(1)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdByUser User                @relation(fields: [createdBy], references: [id])
+  executions    WorkflowExecution[]
+
+  @@index([organizationId])
+  @@map("workflows")
+}
+
+model WorkflowExecution {
+  id             String                  @id @default(uuid())
+  workflowId     String
+  contactId      String
+  conversationId String?
+  triggeredBy    String
+  status         WorkflowExecutionStatus @default(RUNNING)
+  currentNodeId  String?
+  startedAt      DateTime                @default(now())
+  completedAt    DateTime?
+
+  workflow     Workflow            @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  contact      Contact             @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  triggeredByUser User             @relation(fields: [triggeredBy], references: [id])
+  steps        WorkflowExecStep[]
+
+  @@index([workflowId])
+  @@map("workflow_executions")
+}
+
+model WorkflowExecStep {
+  id          String   @id @default(uuid())
+  executionId String
+  nodeId      String
+  status      String
+  output      Json?
+  executedAt  DateTime @default(now())
+
+  execution WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId])
+  @@map("workflow_exec_steps")
+}
+
+// ─── Phase 8 ─────────────────────────────────────────────────────────────────
+
+model Subscription {
+  id                     String             @id @default(uuid())
+  organizationId         String             @unique
+  plan                   SubscriptionPlan   @default(STARTER)
+  status                 SubscriptionStatus @default(TRIALING)
+  providerSubscriptionId String?
+  trialEndsAt            DateTime?
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelledAt            DateTime?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+model UsageRecord {
+  id             String   @id @default(uuid())
+  organizationId String
+  metric         String
+  periodStart    DateTime
+  periodEnd      DateTime
+  value          Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, metric, periodStart])
+  @@index([organizationId])
+  @@map("usage_records")
+}
+
+// ─── Phase 9 ─────────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id             String    @id @default(uuid())
+  organizationId String
+  createdBy      String
+  name           String
+  keyHash        String    @unique
+  scopes         String[]
+  lastUsedAt     DateTime?
+  expiresAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdByUser User         @relation(fields: [createdBy], references: [id])
+
+  @@index([organizationId])
+  @@map("api_keys")
+}
+
+model OutboundWebhook {
+  id             String   @id @default(uuid())
+  organizationId String
+  url            String
+  events         String[]
+  secretHash     String
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("outbound_webhooks")
+}
+
+model Integration {
+  id             String          @id @default(uuid())
+  organizationId String
+  type           IntegrationType
+  config         Json            @default("{}")
+  status         String          @default("disconnected")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, type])
+  @@index([organizationId])
+  @@map("integrations")
+}

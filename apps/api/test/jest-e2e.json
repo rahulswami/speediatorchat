@@ -1,0 +1,18 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": "..",
+  "testMatch": ["<rootDir>/test/**/*.e2e-spec.ts"],
+  "testEnvironment": "node",
+  "setupFiles": ["<rootDir>/test/setup-env.js"],
+  "transform": {
+    "^.+\\.ts$": ["ts-jest", {
+      "tsconfig": "<rootDir>/tsconfig.json"
+    }]
+  },
+  "transformIgnorePatterns": ["/node_modules/"],
+  "moduleNameMapper": {
+    "@speediator/prisma": "<rootDir>/../../packages/prisma/src/index.ts",
+    "@speediator/types": "<rootDir>/../../packages/types/src/index.ts",
+    "@speediator/whatsapp": "<rootDir>/../../packages/whatsapp/src/index.ts"
+  }
+}

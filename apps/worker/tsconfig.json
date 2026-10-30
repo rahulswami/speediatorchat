@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "ES2022",
+    "outDir": "dist",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "declaration": false,
+    "declarationMap": false,
+    "paths": {
+      "@speediator/prisma": ["../../packages/prisma/src/index.ts"],
+      "@speediator/whatsapp": ["../../packages/whatsapp/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*", "../../packages/prisma/src/**/*", "../../packages/whatsapp/src/**/*"]
+}
