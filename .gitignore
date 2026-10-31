@@ -7,3 +7,9 @@ dist/
 *.log
 .DS_Store
 coverage/
+
+# Compiled package artifacts (built by tsc, not source)
+packages/*/src/*.js
+packages/*/src/*.js.map
+packages/*/src/*.d.ts
+packages/*/dist/

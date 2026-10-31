@@ -15,6 +15,7 @@ export function createFastifyAdapter() {
 
 export async function configureApp(app: INestApplication) {
   app.setGlobalPrefix('v1', { exclude: ['health/live', 'health/ready'] });
+  app.enableCors({ origin: process.env.APP_URL ?? 'http://localhost:3000', credentials: true });
   await app.init();
 
   const fastify = (app as NestFastifyApplication).getHttpAdapter().getInstance();

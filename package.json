@@ -8,6 +8,8 @@
     "test:e2e": "turbo run test:e2e",
     "lint": "turbo run lint",
     "prisma": "pnpm --filter @speediator/prisma prisma",
+    "migrate:dev": "pnpm --filter @speediator/prisma migrate:dev",
+    "migrate:prod": "pnpm --filter @speediator/prisma migrate:prod",
     "seed": "pnpm --filter @speediator/prisma seed"
   },
   "devDependencies": {
