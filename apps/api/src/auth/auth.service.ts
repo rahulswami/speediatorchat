@@ -13,6 +13,7 @@ import { RedisService } from '../redis/redis.service';
 import { RegisterDto, LoginDto, JwtPayload } from '@speediator/types';
 import { Role } from '@speediator/prisma';
 
+const REFRESH_REUSE_GRACE_SECONDS = 30;
 const REFRESH_PREFIX = 'refresh';
 
 @Injectable()
@@ -82,7 +83,9 @@ export class AuthService {
     if (!stored) throw new UnauthorizedException('Refresh token revoked');
 
     const { orgId, role } = JSON.parse(stored) as { orgId: string; role: Role };
-    await this.redis.del(key);
+    // Short grace period instead of deleting outright: the web app can fire several requests at
+    // once after the access token lapses, and each one tries to refresh with the same token.
+    await this.redis.set(key, stored, REFRESH_REUSE_GRACE_SECONDS);
     return this.issueTokens(payload.userId, orgId, role);
   }
 
