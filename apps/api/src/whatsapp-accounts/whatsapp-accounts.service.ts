@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ConflictException } from '@nestjs/common
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { encryptToken, decryptToken } from '@speediator/whatsapp';
+import { ACCOUNT_PUBLIC_FIELDS } from './embedded-signup.service';
 
 export interface ConnectAccountDto {
   wabaId: string;
@@ -55,14 +56,7 @@ export class WhatsappAccountsService {
   async list(organizationId: string) {
     return this.prisma.whatsappAccount.findMany({
       where: { organizationId },
-      select: {
-        id: true,
-        wabaId: true,
-        phoneNumberId: true,
-        displayName: true,
-        verified: true,
-        createdAt: true,
-      },
+      select: ACCOUNT_PUBLIC_FIELDS,
       orderBy: { createdAt: 'desc' },
     });
   }

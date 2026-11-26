@@ -211,7 +211,7 @@ model Invite {
 // ─── Phase 2 ─────────────────────────────────────────────────────────────────
 
 model WhatsappAccount {
-  id             String   @id @default(uuid())
+  id             String  @id @default(uuid())
   organizationId String
   wabaId         String
   phoneNumberId  String
@@ -219,10 +219,28 @@ model WhatsappAccount {
   encryptedToken String
   iv             String
   authTag        String
-  verifyToken    String   @unique @default(uuid())
-  verified       Boolean  @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  verifyToken    String  @unique @default(uuid())
+  verified       Boolean @default(false)
+
+  connectionMethod        WhatsappConnectionMethod @default(MANUAL)
+  status                  WhatsappAccountStatus    @default(CONNECTED)
+  businessId              String?
+  displayPhoneNumber      String?
+  // Number is also used on the WhatsApp Business app (coexistence onboarding).
+  isOnBizApp              Boolean                  @default(false)
+  // Two-step verification PIN we set when registering the number; needed to re-register.
+  encryptedPin            String?
+  pinIv                   String?
+  pinAuthTag              String?
+  webhooksSubscribedAt    DateTime?
+  registeredAt            DateTime?
+  contactsSyncRequestedAt DateTime?
+  historySyncRequestedAt  DateTime?
+  lastSetupError          String?
+  disconnectedAt          DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   webhookEvents WebhookEvent[]
@@ -231,7 +249,20 @@ model WhatsappAccount {
   campaigns     Campaign[]
 
   @@index([organizationId])
+  @@index([phoneNumberId])
+  @@index([wabaId])
   @@map("whatsapp_accounts")
+}
+
+enum WhatsappConnectionMethod {
+  MANUAL
+  EMBEDDED_SIGNUP
+}
+
+enum WhatsappAccountStatus {
+  CONNECTED
+  SETUP_INCOMPLETE
+  DISCONNECTED
 }
 
 model WebhookEvent {
@@ -270,7 +301,7 @@ model Contact {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  organization     Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   conversations    Conversation[]
   tagMap           ContactTagMap[]
   attributes       ContactAttribute[]
@@ -460,20 +491,20 @@ model CampaignContact {
 // ─── Phase 7 ─────────────────────────────────────────────────────────────────
 
 model Workflow {
-  id             String        @id @default(uuid())
+  id             String         @id @default(uuid())
   organizationId String
   createdBy      String
   name           String
   triggerType    String
-  triggerConfig  Json          @default("{}")
-  nodes          Json          @default("[]")
-  edges          Json          @default("[]")
+  triggerConfig  Json           @default("{}")
+  nodes          Json           @default("[]")
+  edges          Json           @default("[]")
   status         WorkflowStatus @default(DRAFT)
-  version        Int           @default(1)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  version        Int            @default(1)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
-  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization  Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdByUser User                @relation(fields: [createdBy], references: [id])
   executions    WorkflowExecution[]
 
@@ -492,10 +523,10 @@ model WorkflowExecution {
   startedAt      DateTime                @default(now())
   completedAt    DateTime?
 
-  workflow     Workflow            @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  contact      Contact             @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  triggeredByUser User             @relation(fields: [triggeredBy], references: [id])
-  steps        WorkflowExecStep[]
+  workflow        Workflow           @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  contact         Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  triggeredByUser User               @relation(fields: [triggeredBy], references: [id])
+  steps           WorkflowExecStep[]
 
   @@index([workflowId])
   @@map("workflow_executions")
@@ -565,7 +596,7 @@ model ApiKey {
   expiresAt      DateTime?
   createdAt      DateTime  @default(now())
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdByUser User         @relation(fields: [createdBy], references: [id])
 
   @@index([organizationId])

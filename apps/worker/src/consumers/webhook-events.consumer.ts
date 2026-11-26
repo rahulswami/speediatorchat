@@ -7,6 +7,14 @@ import { ConversationsService } from '../conversations/conversations.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 const WEBHOOK_QUEUE = 'webhook-events';
+// Meta's docs don't say which of these fires when a customer removes our access, so both count.
+const DISCONNECT_EVENTS = new Set(['PARTNER_APP_UNINSTALLED', 'PARTNER_REMOVED', 'ACCOUNT_DELETED', 'ACCOUNT_OFFBOARDED']);
+
+interface AccountUpdateValue {
+  event?: string;
+  waba_info?: { waba_id?: string; owner_business_id?: string };
+}
+
 const OPT_OUT_KEYWORDS = /^(stop|unsubscribe|opt\s*out)$/i;
 
 @Processor(WEBHOOK_QUEUE)
@@ -62,6 +70,7 @@ export class WebhookEventsConsumer extends WorkerHost {
     const payload = event.payload as {
       entry?: Array<{
         changes?: Array<{
+          field?: string;
           value?: {
             messages?: Array<{
               id: string;
@@ -82,8 +91,14 @@ export class WebhookEventsConsumer extends WorkerHost {
       }>;
     };
 
-    const value = payload.entry?.[0]?.changes?.[0]?.value;
+    const change = payload.entry?.[0]?.changes?.[0];
+    const value = change?.value;
     if (!value) return;
+
+    if (change.field === 'account_update') {
+      await this.processAccountUpdate(event.organizationId, change.value as AccountUpdateValue);
+      return;
+    }
 
     const account = event.whatsappAccountId
       ? await this.prisma.whatsappAccount.findUnique({ where: { id: event.whatsappAccountId } })
@@ -102,6 +117,24 @@ export class WebhookEventsConsumer extends WorkerHost {
         await this.processStatusUpdate(status);
       }
     }
+  }
+
+  private async processAccountUpdate(organizationId: string, value: AccountUpdateValue) {
+    const wabaId = value.waba_info?.waba_id;
+    if (!wabaId || !DISCONNECT_EVENTS.has(value.event ?? '')) {
+      this.logger.debug(`account_update ${value.event} for WABA ${wabaId}: no action`);
+      return;
+    }
+
+    const { count } = await this.prisma.whatsappAccount.updateMany({
+      where: { organizationId, wabaId, status: { not: 'DISCONNECTED' } },
+      data: {
+        status: 'DISCONNECTED',
+        disconnectedAt: new Date(),
+        lastSetupError: `Access was removed in Meta (${value.event}). Connect the number again to keep messaging.`,
+      },
+    });
+    this.logger.warn(`WABA ${wabaId} sent ${value.event}; marked ${count} account(s) disconnected`);
   }
 
   private async processInboundMessage(

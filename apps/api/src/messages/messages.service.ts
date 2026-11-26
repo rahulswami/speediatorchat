@@ -40,6 +40,14 @@ export class MessagesService {
     });
     if (!conversation) throw new NotFoundException('Conversation not found');
 
+    if (conversation.whatsappAccount.status !== 'CONNECTED') {
+      throw new BadRequestException(
+        conversation.whatsappAccount.status === 'DISCONNECTED'
+          ? 'This WhatsApp number was disconnected. Connect it again from the Connect page.'
+          : 'This WhatsApp number has not finished setup. Finish it on the Connect page.',
+      );
+    }
+
     // Enforce 24-hour session window
     if (!conversation.sessionExpiresAt || conversation.sessionExpiresAt < new Date()) {
       throw new BadRequestException(

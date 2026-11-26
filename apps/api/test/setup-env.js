@@ -10,3 +10,6 @@ process.env.WHATSAPP_TOKEN_ENCRYPTION_KEY = '0'.repeat(64);
 process.env.WHATSAPP_APP_SECRET = 'test-app-secret';
 process.env.NODE_ENV = 'test';
 process.env.APP_URL = 'http://localhost:3000';
+process.env.META_APP_ID = '1234567890';
+process.env.META_EMBEDDED_SIGNUP_CONFIG_ID = '9876543210';
+process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN = 'app-level-verify-token-for-tests';

@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { z } from 'zod';
 import { WhatsappAccountsService } from './whatsapp-accounts.service';
+import { EmbeddedSignupService } from './embedded-signup.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequestUser } from '@speediator/types';
@@ -22,10 +23,45 @@ const ConnectAccountSchema = z.object({
   accessToken: z.string().min(1),
 });
 
+const metaId = z.string().regex(/^\d+$/, 'Expected a numeric Meta ID').max(32);
+const EmbeddedSignupSchema = z.object({
+  code: z.string().min(1).max(2048),
+  wabaId: metaId,
+  phoneNumberId: metaId.optional(),
+  businessId: metaId.optional(),
+  event: z.enum(['FINISH', 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING']),
+});
+
 @UseGuards(JwtAuthGuard)
 @Controller('whatsapp-accounts')
 export class WhatsappAccountsController {
-  constructor(private readonly service: WhatsappAccountsService) {}
+  constructor(
+    private readonly service: WhatsappAccountsService,
+    private readonly embeddedSignup: EmbeddedSignupService,
+  ) {}
+
+  @Get('embedded-signup/config')
+  embeddedSignupConfig() {
+    return this.embeddedSignup.getPublicConfig();
+  }
+
+  @Post('embedded-signup')
+  async completeEmbeddedSignup(
+    @CurrentUser() user: RequestUser,
+    @Body(new ZodValidationPipe(EmbeddedSignupSchema)) body: z.infer<typeof EmbeddedSignupSchema>,
+  ) {
+    const { event, ...ids } = body;
+    return this.embeddedSignup.complete(user.orgId, {
+      ...ids,
+      coexistence: event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
+    });
+  }
+
+  @Post(':id/finish-setup')
+  @HttpCode(200)
+  async finishSetup(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.embeddedSignup.retrySetup(user.orgId, id);
+  }
 
   @Post()
   async connect(

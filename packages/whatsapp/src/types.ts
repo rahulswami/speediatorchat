@@ -48,3 +48,14 @@ export interface MetaTemplateApiResponse {
   id: string;
   status: string;
 }
+
+export interface PhoneNumberDetails {
+  id: string;
+  display_phone_number?: string;
+  verified_name?: string;
+  /** True when the number is also in use on the WhatsApp Business app (coexistence). */
+  is_on_biz_app?: boolean;
+  platform_type?: string;
+}
+
+export type SmbAppDataSyncType = 'smb_app_state_sync' | 'history';
