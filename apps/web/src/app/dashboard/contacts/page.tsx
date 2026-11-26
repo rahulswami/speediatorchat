@@ -1,13 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Search, UserX, UserCheck } from 'lucide-react';
+import { Search, UserX, UserCheck, Plus, Upload } from 'lucide-react';
+import { AddContactDialog } from './add-contact-dialog';
+import { ImportContactsDialog } from './import-contacts-dialog';
 
 interface Contact {
   id: string;
   phone: string;
   name: string | null;
   optedIn: boolean;
+  optInSource: string | null;
   optedOut: boolean;
   lastSeenAt: string | null;
   tagMap: Array<{ tag: { id: string; name: string; color: string } }>;
@@ -27,6 +30,7 @@ export default function ContactsPage() {
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [dialog, setDialog] = useState<'add' | 'import' | null>(null);
 
   async function load(q = '') {
     setLoading(true);
@@ -54,12 +58,36 @@ export default function ContactsPage() {
 
   return (
     <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold">Contacts</h1>
           <p className="text-sm text-muted-foreground">{total} total</p>
         </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setDialog('import')}
+            className="flex items-center gap-2 whitespace-nowrap text-sm border px-4 py-2 rounded-md"
+          >
+            <Upload className="w-4 h-4" /> Import CSV
+          </button>
+          <button
+            onClick={() => setDialog('add')}
+            className="flex items-center gap-2 whitespace-nowrap text-sm bg-primary text-primary-foreground px-4 py-2 rounded-md"
+          >
+            <Plus className="w-4 h-4" /> Add contact
+          </button>
+        </div>
       </div>
+
+      {dialog === 'add' && (
+        <AddContactDialog
+          onClose={() => setDialog(null)}
+          onSaved={() => { setDialog(null); load(search); }}
+        />
+      )}
+      {dialog === 'import' && (
+        <ImportContactsDialog onClose={() => setDialog(null)} onImported={() => load(search)} />
+      )}
 
       <div className="bg-background border rounded-lg overflow-hidden">
         <div className="p-4 border-b">
@@ -114,7 +142,10 @@ export default function ContactsPage() {
                         <UserX className="w-3 h-3" /> Opted out
                       </span>
                     ) : c.optedIn ? (
-                      <span className="flex items-center gap-1 text-green-600 text-xs">
+                      <span
+                        className="flex items-center gap-1 text-green-600 text-xs"
+                        title={c.optInSource ? `Source: ${c.optInSource}` : undefined}
+                      >
                         <UserCheck className="w-3 h-3" /> Opted in
                       </span>
                     ) : (

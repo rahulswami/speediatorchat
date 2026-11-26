@@ -22,6 +22,39 @@ const UpdateContactSchema = z.object({
   optedIn: z.boolean().optional(),
 });
 
+const optInFields = {
+  optedIn: z.boolean().default(false),
+  optInSource: z.string().trim().max(200).optional(),
+  defaultCountryCode: z.string().regex(/^\d{1,4}$/).default('91'),
+};
+const optInSourceRequired = (d: { optedIn: boolean; optInSource?: string }) =>
+  !d.optedIn || !!d.optInSource;
+const optInSourceMessage = {
+  message: 'Say where consent came from when opting in',
+  path: ['optInSource'],
+};
+const optionalName = z
+  .string()
+  .trim()
+  .max(100)
+  .optional()
+  .transform((v) => v || undefined);
+
+const CreateContactSchema = z
+  .object({ phone: z.string().trim().min(1).max(40), name: optionalName, ...optInFields })
+  .refine(optInSourceRequired, optInSourceMessage);
+
+const MAX_IMPORT_ROWS = 5000;
+const ImportContactsSchema = z
+  .object({
+    rows: z
+      .array(z.object({ phone: z.string().max(40), name: optionalName }))
+      .min(1)
+      .max(MAX_IMPORT_ROWS),
+    ...optInFields,
+  })
+  .refine(optInSourceRequired, optInSourceMessage);
+
 const TagSchema = z.object({ name: z.string().min(1) });
 const AttributeSchema = z.object({ key: z.string().min(1), value: z.string() });
 
@@ -44,6 +77,23 @@ export class ContactsController {
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
+  }
+
+  @Post()
+  async create(
+    @CurrentUser() user: RequestUser,
+    @Body(new ZodValidationPipe(CreateContactSchema)) body: z.infer<typeof CreateContactSchema>,
+  ) {
+    return this.service.create(user.orgId, body);
+  }
+
+  @Post('import')
+  @HttpCode(200)
+  async import(
+    @CurrentUser() user: RequestUser,
+    @Body(new ZodValidationPipe(ImportContactsSchema)) body: z.infer<typeof ImportContactsSchema>,
+  ) {
+    return this.service.import(user.orgId, body);
   }
 
   @Get(':id')

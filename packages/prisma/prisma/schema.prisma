@@ -263,6 +263,7 @@ model Contact {
   avatarUrl      String?
   optedIn        Boolean   @default(false)
   optedInAt      DateTime?
+  optInSource    String?
   optedOutAt     DateTime?
   optedOut       Boolean   @default(false)
   lastSeenAt     DateTime?

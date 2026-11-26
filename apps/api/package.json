@@ -55,5 +55,28 @@
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.0",
     "typescript": "^5.6.0"
+  },
+  "jest": {
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "testEnvironment": "node",
+    "transform": {
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "tsconfig": "<rootDir>/../tsconfig.json"
+        }
+      ]
+    },
+    "moduleNameMapper": {
+      "@speediator/prisma": "<rootDir>/../../../packages/prisma/src/index.ts",
+      "@speediator/types": "<rootDir>/../../../packages/types/src/index.ts",
+      "@speediator/whatsapp": "<rootDir>/../../../packages/whatsapp/src/index.ts"
+    }
   }
 }
