@@ -27,7 +27,7 @@ export class CampaignsService {
     scheduledAt?: string;
   }) {
     await this.verifyAccount(organizationId, data.whatsappAccountId);
-    await this.verifyTemplate(organizationId, data.templateId);
+    await this.verifyTemplate(organizationId, data.templateId, data.whatsappAccountId);
     return this.prisma.campaign.create({
       data: {
         organizationId,
@@ -158,11 +158,15 @@ export class CampaignsService {
     if (!account) throw new ForbiddenException('WhatsApp account not found');
   }
 
-  private async verifyTemplate(organizationId: string, templateId: string) {
+  private async verifyTemplate(organizationId: string, templateId: string, whatsappAccountId: string) {
     const template = await this.prisma.template.findFirst({
       where: { id: templateId, organizationId },
     });
     if (!template) throw new ForbiddenException('Template not found');
+    // Templates belong to one WhatsApp account; Meta rejects them from any other number.
+    if (template.whatsappAccountId !== whatsappAccountId) {
+      throw new BadRequestException('This template belongs to a different WhatsApp number');
+    }
     if (template.status !== 'APPROVED') throw new BadRequestException('Only approved templates can be used in campaigns');
   }
 }

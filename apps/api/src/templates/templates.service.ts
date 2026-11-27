@@ -96,7 +96,7 @@ export class TemplatesService {
 
     const { data: metaTemplates } = await whatsAppClient.listTemplates(account.wabaId, accessToken);
 
-    let synced = 0;
+    const seen: string[] = [];
     for (const mt of metaTemplates) {
       const t = mt as {
         id: string;
@@ -107,6 +107,9 @@ export class TemplatesService {
         components: object[];
         rejected_reason?: string;
       };
+      const status = toTemplateStatus(t.status);
+      const rejectionReason = t.rejected_reason && t.rejected_reason !== 'NONE' ? t.rejected_reason : null;
+      seen.push(t.id);
 
       await this.prisma.template.upsert({
         where: { organizationId_name_language: { organizationId, name: t.name, language: t.language } },
@@ -116,23 +119,42 @@ export class TemplatesService {
           metaTemplateId: t.id,
           name: t.name,
           language: t.language,
-          category: t.category as TemplateCategory,
-          status: t.status as TemplateStatus,
+          category: toTemplateCategory(t.category),
+          status,
           components: t.components,
-          rejectionReason: t.rejected_reason ?? null,
+          rejectionReason,
           syncedAt: new Date(),
         },
         update: {
-          status: t.status as TemplateStatus,
-          rejectionReason: t.rejected_reason ?? null,
+          metaTemplateId: t.id,
+          category: toTemplateCategory(t.category),
+          status,
+          rejectionReason,
           components: t.components,
           syncedAt: new Date(),
         },
       });
-      synced++;
     }
 
-    return { synced };
+    // A template deleted in Meta must stop being sendable here too.
+    const { count: removed } = await this.prisma.template.updateMany({
+      where: {
+        organizationId,
+        whatsappAccountId,
+        metaTemplateId: { notIn: seen },
+        status: { not: 'DISABLED' },
+        syncedAt: { not: null },
+      },
+      data: { status: 'DISABLED', rejectionReason: 'No longer exists in Meta' },
+    });
+
+    const templates = await this.prisma.template.findMany({
+      where: { organizationId, whatsappAccountId },
+      orderBy: [{ name: 'asc' }, { language: 'asc' }],
+      select: { id: true, name: true, language: true, category: true, status: true, rejectionReason: true },
+    });
+
+    return { synced: seen.length, removed, templates };
   }
 
   async handleStatusWebhook(data: {
@@ -165,4 +187,29 @@ export class TemplatesService {
     }
     return template;
   }
+}
+
+// Meta has more template statuses than we store. Anything we don't recognise is treated as
+// not sendable, so it can never be used in a campaign by mistake.
+export function toTemplateStatus(status: string): TemplateStatus {
+  switch (status) {
+    case 'APPROVED':
+      return 'APPROVED';
+    case 'REJECTED':
+      return 'REJECTED';
+    case 'PAUSED':
+      return 'PAUSED';
+    case 'DISABLED':
+    case 'DELETED':
+    case 'PENDING_DELETION':
+    case 'ARCHIVED':
+    case 'LIMIT_EXCEEDED':
+      return 'DISABLED';
+    default:
+      return 'PENDING';
+  }
+}
+
+export function toTemplateCategory(category: string): TemplateCategory {
+  return category === 'UTILITY' || category === 'AUTHENTICATION' ? category : 'MARKETING';
 }

@@ -13,6 +13,7 @@ const BASE_URL = 'https://graph.facebook.com';
 const PHONE_NUMBER_FIELDS = 'id,display_phone_number,verified_name,is_on_biz_app,platform_type';
 
 const MAX_RETRIES = 5;
+const MAX_TEMPLATE_PAGES = 50;
 const INITIAL_DELAY_MS = 1000;
 const MAX_DELAY_MS = 32000;
 
@@ -138,14 +139,19 @@ export class WhatsAppClient {
     return res.json();
   }
 
+  /** Reads every page: Meta returns templates a page at a time (25 by default). */
   async listTemplates(wabaId: string, accessToken: string): Promise<{ data: object[] }> {
-    const res = await fetchWithRetry(
-      `${this.baseUrl}/${wabaId}/message_templates?fields=name,language,category,status,components,rejected_reason`,
-      {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      },
-    );
-    return res.json();
+    const data: object[] = [];
+    let url: string | undefined =
+      `${this.baseUrl}/${wabaId}/message_templates?fields=name,language,category,status,components,rejected_reason&limit=100`;
+    for (let page = 0; url && page < MAX_TEMPLATE_PAGES; page++) {
+      const res = await fetchWithRetry(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      const body = (await res.json()) as { data?: object[]; paging?: { next?: string } };
+      data.push(...(body.data ?? []));
+      // Only follow Graph's own next link, never a URL on another host.
+      url = body.paging?.next?.startsWith(`${BASE_URL}/`) ? body.paging.next : undefined;
+    }
+    return { data };
   }
 }
 
