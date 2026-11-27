@@ -26,7 +26,13 @@ export class WebhookSignatureGuard implements CanActivate {
 
     const appSecret = this.config.get<string>('WHATSAPP_APP_SECRET');
     if (!appSecret) {
-      // In dev/test with no secret configured, skip verification
+      // Without the secret anyone could post fake messages, so production refuses them.
+      // Local development may run without one to replay sample payloads.
+      if (this.config.get<string>('NODE_ENV') === 'production') {
+        this.logger.error('WHATSAPP_APP_SECRET is not set; rejecting webhook');
+        throw new ForbiddenException('Webhook signature cannot be verified');
+      }
+      this.logger.warn('WHATSAPP_APP_SECRET is not set; skipping signature check outside production');
       return true;
     }
 

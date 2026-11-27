@@ -197,6 +197,15 @@ export class WhatsAppOnboardingClient {
     return body.data ?? [];
   }
 
+  /** Apps receiving this WABA's webhooks. Each entry's whatsapp_business_api_data.id is an app ID. */
+  async listSubscribedApps(wabaId: string, accessToken: string): Promise<Array<{ id?: string; name?: string }>> {
+    const res = await fetchWithRetry(`${this.baseUrl}/${wabaId}/subscribed_apps`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const body = (await res.json()) as { data?: Array<{ whatsapp_business_api_data?: { id?: string; name?: string } }> };
+    return (body.data ?? []).map((d) => d.whatsapp_business_api_data ?? {});
+  }
+
   /** Without this, Meta does not deliver the customer's webhooks to our callback. */
   async subscribeAppToWaba(wabaId: string, accessToken: string): Promise<void> {
     await fetchWithRetry(`${this.baseUrl}/${wabaId}/subscribed_apps`, {

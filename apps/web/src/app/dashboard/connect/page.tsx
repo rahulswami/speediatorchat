@@ -36,6 +36,12 @@ function historyNote(a: WhatsappAccount): string | null {
   return `Importing chat history: ${a.historySyncProgress}%`;
 }
 
+interface CheckResult {
+  ok: boolean;
+  checkedAt: string;
+  checks: Array<{ key: string; label: string; ok: boolean; detail: string; at?: string }>;
+}
+
 type Phase =
   | { kind: 'idle' }
   | { kind: 'facebook' }
@@ -96,12 +102,40 @@ function StepList({ account }: { account: WhatsappAccount }) {
   );
 }
 
+function CheckPanel({ result }: { result: CheckResult | { error: string } }) {
+  if ('error' in result) return <p className="mt-2 text-xs text-destructive">{result.error}</p>;
+  return (
+    <div className={`mt-2 rounded-md p-3 text-xs space-y-1.5 ${result.ok ? 'bg-green-50' : 'bg-amber-50'}`}>
+      <p className="font-medium">
+        {result.ok ? 'This number is working.' : 'Something needs attention:'}
+      </p>
+      {result.checks.map((c) => (
+        <div key={c.key} className="flex gap-2">
+          {c.ok ? (
+            <CheckCircle2 className="w-3.5 h-3.5 text-green-600 shrink-0 mt-0.5" />
+          ) : (
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+          )}
+          <div>
+            <p>{c.label}</p>
+            <p className="text-muted-foreground">
+              {c.at ? `Last one ${new Date(c.at).toLocaleString()}` : c.detail}
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function ConnectWhatsAppPage() {
   const [config, setConfig] = useState<EmbeddedSignupConfig | null>(null);
   const [accounts, setAccounts] = useState<WhatsappAccount[]>([]);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [retrying, setRetrying] = useState<string | null>(null);
   const [showManual, setShowManual] = useState(false);
+  const [checking, setChecking] = useState<string | null>(null);
+  const [checkResults, setCheckResults] = useState<Record<string, CheckResult | { error: string }>>({});
   const [sdk, setSdk] = useState<FbSdk | null>(null);
   // Bumped on cancel so a late answer from an abandoned popup is ignored.
   const runId = useRef(0);
@@ -163,6 +197,20 @@ export default function ConnectWhatsAppPage() {
       setPhase({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {
       setRetrying(null);
+    }
+  }
+
+  async function checkConnection(id: string) {
+    setChecking(id);
+    try {
+      const result = (await readJson(
+        await fetch(`/api/whatsapp/accounts/${id}/check`, { method: 'POST' }),
+      )) as CheckResult;
+      setCheckResults((r) => ({ ...r, [id]: result }));
+    } catch (err) {
+      setCheckResults((r) => ({ ...r, [id]: { error: err instanceof Error ? err.message : String(err) } }));
+    } finally {
+      setChecking(null);
     }
   }
 
@@ -261,7 +309,8 @@ export default function ConnectWhatsAppPage() {
           <h2 className="font-semibold px-6 pt-5 pb-3">Your numbers</h2>
           <ul>
             {accounts.map((a) => (
-              <li key={a.id} className="border-t px-6 py-3 flex items-center justify-between gap-3">
+              <li key={a.id} className="border-t px-6 py-3">
+               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium truncate">{a.displayName}</p>
                   <p className="text-xs text-muted-foreground">
@@ -276,6 +325,13 @@ export default function ConnectWhatsAppPage() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <StatusBadge status={a.status} />
+                  <button
+                    onClick={() => checkConnection(a.id)}
+                    disabled={checking === a.id}
+                    className="text-xs border rounded-md px-2 py-1 disabled:opacity-60"
+                  >
+                    {checking === a.id ? 'Checking…' : 'Check connection'}
+                  </button>
                   {a.status === 'SETUP_INCOMPLETE' && (
                     <button
                       onClick={() => finishSetup(a.id)}
@@ -295,6 +351,8 @@ export default function ConnectWhatsAppPage() {
                     </button>
                   )}
                 </div>
+               </div>
+                {checkResults[a.id] && <CheckPanel result={checkResults[a.id]} />}
               </li>
             ))}
           </ul>

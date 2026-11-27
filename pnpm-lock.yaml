@@ -399,6 +399,9 @@ importers:
       '@speediator/prisma':
         specifier: workspace:*
         version: link:../../packages/prisma
+      '@speediator/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       '@speediator/whatsapp':
         specifier: workspace:*
         version: link:../../packages/whatsapp

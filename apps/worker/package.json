@@ -17,6 +17,7 @@
     "@nestjs/platform-fastify": "^10.4.0",
     "@nestjs/terminus": "^10.2.3",
     "@speediator/prisma": "workspace:*",
+    "@speediator/types": "workspace:*",
     "@speediator/whatsapp": "workspace:*",
     "bullmq": "^5.25.0",
     "ioredis": "^5.4.1",

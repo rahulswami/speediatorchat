@@ -27,6 +27,13 @@ interface AccountUpdateValue {
 
 const OPT_OUT_KEYWORDS = /^(stop|unsubscribe|opt\s*out)$/i;
 const SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
+const STATUS_ORDER = ['PENDING', 'SENT', 'DELIVERED', 'READ'] as const;
+const STATUS_MAP: Record<string, 'SENT' | 'DELIVERED' | 'READ' | 'FAILED'> = {
+  sent: 'SENT',
+  delivered: 'DELIVERED',
+  read: 'READ',
+  failed: 'FAILED',
+};
 
 @Processor(WEBHOOK_QUEUE)
 export class WebhookEventsConsumer extends WorkerHost {
@@ -96,6 +103,7 @@ export class WebhookEventsConsumer extends WorkerHost {
               id: string;
               status: string;
               timestamp: string;
+              errors?: Array<{ title?: string; message?: string }>;
             }>;
             contacts?: Array<{ profile?: { name?: string } }>;
             metadata?: { display_phone_number?: string; phone_number_id?: string };
@@ -145,7 +153,7 @@ export class WebhookEventsConsumer extends WorkerHost {
     // Process status updates
     if (value.statuses?.length) {
       for (const status of value.statuses) {
-        await this.processStatusUpdate(status);
+        await this.processStatusUpdate(event.organizationId, status);
       }
     }
   }
@@ -234,24 +242,38 @@ export class WebhookEventsConsumer extends WorkerHost {
     this.logger.debug(`Processed inbound message ${msg.id} from ${phone}`);
   }
 
-  private async processStatusUpdate(status: { id: string; status: string; timestamp: string }) {
-    const statusMap: Record<string, 'SENT' | 'DELIVERED' | 'READ' | 'FAILED'> = {
-      sent: 'SENT',
-      delivered: 'DELIVERED',
-      read: 'READ',
-      failed: 'FAILED',
-    };
-
-    const mapped = statusMap[status.status];
+  private async processStatusUpdate(
+    organizationId: string,
+    status: { id: string; status: string; timestamp: string; errors?: Array<{ title?: string; message?: string }> },
+  ) {
+    const mapped = STATUS_MAP[status.status];
     if (!mapped) return;
+    const at = toDate(status.timestamp);
+    // Meta can deliver statuses out of order, so only ever move forward (read beats delivered).
+    const earlier = mapped === 'FAILED' ? [] : STATUS_ORDER.slice(0, STATUS_ORDER.indexOf(mapped));
+    const error = status.errors?.[0]?.message ?? status.errors?.[0]?.title;
 
-    const ts = new Date(parseInt(status.timestamp, 10) * 1000);
     await this.prisma.message.updateMany({
-      where: { metaMessageId: status.id },
+      where: { organizationId, metaMessageId: status.id, ...(mapped === 'FAILED' ? {} : { status: { in: earlier } }) },
       data: {
         status: mapped,
-        ...(mapped === 'DELIVERED' ? { deliveredAt: ts } : {}),
-        ...(mapped === 'READ' ? { readAt: ts } : {}),
+        ...(mapped === 'DELIVERED' ? { deliveredAt: at } : {}),
+        ...(mapped === 'READ' ? { readAt: at } : {}),
+      },
+    });
+
+    await this.prisma.campaignContact.updateMany({
+      where: {
+        metaMessageId: status.id,
+        campaign: { organizationId },
+        ...(mapped === 'FAILED' ? {} : { status: { in: earlier } }),
+      },
+      data: {
+        status: mapped,
+        ...(mapped === 'DELIVERED' ? { deliveredAt: at } : {}),
+        // A read receipt implies delivery even if the delivered status never arrived.
+        ...(mapped === 'READ' ? { readAt: at } : {}),
+        ...(mapped === 'FAILED' ? { error: error ?? 'Meta reported the message as failed' } : {}),
       },
     });
   }

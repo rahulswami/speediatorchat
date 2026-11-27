@@ -7,9 +7,23 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { CampaignStatus } from '@speediator/prisma';
+import { CampaignStatus, CampaignContactStatus } from '@speediator/prisma';
+import { audienceWhere, type AudienceFilter } from '@speediator/types';
 
 export const CAMPAIGN_FANOUT_QUEUE = 'campaign-fanout';
+
+export const RECIPIENT_FILTERS = ['pending', 'sent', 'delivered', 'read', 'failed', 'skipped'] as const;
+type RecipientFilter = (typeof RECIPIENT_FILTERS)[number];
+
+// "sent" counts everything that left, including what was later delivered or read.
+const RECIPIENT_STATUSES: Record<RecipientFilter, CampaignContactStatus[]> = {
+  pending: ['PENDING'],
+  sent: ['SENT', 'DELIVERED', 'READ'],
+  delivered: ['DELIVERED', 'READ'],
+  read: ['READ'],
+  failed: ['FAILED'],
+  skipped: ['SKIPPED_OPTED_OUT', 'SKIPPED_NO_SESSION'],
+};
 
 @Injectable()
 export class CampaignsService {
@@ -22,7 +36,7 @@ export class CampaignsService {
     name: string;
     whatsappAccountId: string;
     templateId: string;
-    audienceFilter?: object;
+    audienceFilter?: AudienceFilter;
     variableMap?: object;
     scheduledAt?: string;
   }) {
@@ -35,7 +49,7 @@ export class CampaignsService {
         name: data.name,
         whatsappAccountId: data.whatsappAccountId,
         templateId: data.templateId,
-        audienceFilter: data.audienceFilter ?? {},
+        audienceFilter: data.audienceFilter ?? { mode: 'all' },
         variableMap: data.variableMap ?? {},
         scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : undefined,
       },
@@ -69,19 +83,72 @@ export class CampaignsService {
     await this.get(organizationId, id);
     const stats = await this.prisma.campaignContact.groupBy({
       by: ['status'],
-      where: { campaignId: id },
+      where: { campaignId: id, campaign: { organizationId } },
       _count: true,
     });
-    const result: Record<string, number> = {
-      PENDING: 0, SENT: 0, FAILED: 0, SKIPPED_OPTED_OUT: 0, SKIPPED_NO_SESSION: 0,
+    const byStatus = Object.fromEntries(stats.map((s) => [s.status, s._count])) as Partial<
+      Record<CampaignContactStatus, number>
+    >;
+    const count = (filter: RecipientFilter) =>
+      RECIPIENT_STATUSES[filter].reduce((sum, st) => sum + (byStatus[st] ?? 0), 0);
+
+    const total = stats.reduce((sum, s) => sum + s._count, 0);
+    const sent = count('sent');
+    const delivered = count('delivered');
+    const read = count('read');
+    const pct = (n: number, of: number) => (of > 0 ? Math.round((n / of) * 100) : 0);
+    return {
+      total,
+      pending: count('pending'),
+      sent,
+      delivered,
+      read,
+      failed: count('failed'),
+      skipped: count('skipped'),
+      deliveryRate: pct(delivered, sent),
+      readRate: pct(read, delivered),
     };
-    for (const s of stats) result[s.status] = s._count;
-    return result;
+  }
+
+  async listRecipients(
+    organizationId: string,
+    id: string,
+    opts: { status?: RecipientFilter; page: number; limit: number },
+  ) {
+    await this.get(organizationId, id);
+    const where = {
+      campaignId: id,
+      campaign: { organizationId },
+      ...(opts.status ? { status: { in: RECIPIENT_STATUSES[opts.status] } } : {}),
+    };
+    const [items, total] = await Promise.all([
+      this.prisma.campaignContact.findMany({
+        where,
+        orderBy: [{ sentAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+        skip: (opts.page - 1) * opts.limit,
+        take: opts.limit,
+        select: {
+          id: true,
+          status: true,
+          error: true,
+          sentAt: true,
+          deliveredAt: true,
+          readAt: true,
+          contact: { select: { id: true, name: true, phone: true } },
+        },
+      }),
+      this.prisma.campaignContact.count({ where }),
+    ]);
+    return { items, total, page: opts.page, limit: opts.limit };
+  }
+
+  async countAudience(organizationId: string, filter: AudienceFilter) {
+    return { count: await this.prisma.contact.count({ where: audienceWhere(organizationId, filter) }) };
   }
 
   async update(organizationId: string, id: string, data: {
     name?: string;
-    audienceFilter?: object;
+    audienceFilter?: AudienceFilter;
     variableMap?: object;
     scheduledAt?: string;
   }) {
@@ -110,20 +177,7 @@ export class CampaignsService {
 
   async getAudienceCount(organizationId: string, id: string) {
     const campaign = await this.get(organizationId, id);
-    const filter = campaign.audienceFilter as Record<string, unknown>;
-    const tagIds = (filter.tagIds as string[] | undefined) ?? [];
-
-    let count: number;
-    if (tagIds.length > 0) {
-      count = await this.prisma.contact.count({
-        where: { organizationId, optedIn: true, tagMap: { some: { tagId: { in: tagIds } } } },
-      });
-    } else {
-      count = await this.prisma.contact.count({
-        where: { organizationId, optedIn: true },
-      });
-    }
-    return { count };
+    return this.countAudience(organizationId, campaign.audienceFilter as AudienceFilter);
   }
 
   async launch(organizationId: string, id: string) {

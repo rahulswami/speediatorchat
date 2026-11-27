@@ -11,6 +11,7 @@ import {
 import { z } from 'zod';
 import { WhatsappAccountsService } from './whatsapp-accounts.service';
 import { EmbeddedSignupService } from './embedded-signup.service';
+import { ConnectionCheckService } from './connection-check.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequestUser } from '@speediator/types';
@@ -38,7 +39,14 @@ export class WhatsappAccountsController {
   constructor(
     private readonly service: WhatsappAccountsService,
     private readonly embeddedSignup: EmbeddedSignupService,
+    private readonly connectionCheck: ConnectionCheckService,
   ) {}
+
+  @Post(':id/check')
+  @HttpCode(200)
+  async check(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.connectionCheck.check(user.orgId, id);
+  }
 
   @Get('embedded-signup/config')
   embeddedSignupConfig() {

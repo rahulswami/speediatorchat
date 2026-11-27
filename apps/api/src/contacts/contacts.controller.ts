@@ -96,6 +96,11 @@ export class ContactsController {
     return this.service.import(user.orgId, body);
   }
 
+  @Get('tags')
+  async listTags(@CurrentUser() user: RequestUser) {
+    return this.service.listTags(user.orgId);
+  }
+
   @Get(':id')
   async get(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.service.get(user.orgId, id);

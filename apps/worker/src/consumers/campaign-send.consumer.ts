@@ -3,7 +3,8 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignContactStatus, CampaignStatus } from '@speediator/prisma';
-import { WhatsAppClient, decryptToken } from '@speediator/whatsapp';
+import { WhatsAppApiError, WhatsAppClient, decryptToken } from '@speediator/whatsapp';
+import { ConversationsService } from '../conversations/conversations.service';
 import { ConfigService } from '@nestjs/config';
 
 export const CAMPAIGN_SEND_QUEUE = 'campaign-send';
@@ -15,6 +16,7 @@ export class CampaignSendConsumer extends WorkerHost {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly conversations: ConversationsService,
   ) {
     super();
   }
@@ -54,32 +56,50 @@ export class CampaignSendConsumer extends WorkerHost {
       return;
     }
 
-    try {
-      const encKey = this.config.get<string>('WHATSAPP_TOKEN_ENCRYPTION_KEY')!;
-      const plainToken = decryptToken(
-        { iv: campaign.whatsappAccount.iv, authTag: campaign.whatsappAccount.authTag, encryptedToken: campaign.whatsappAccount.encryptedToken },
-        encKey,
-      );
-      const client = new WhatsAppClient(this.config.get<string>('WHATSAPP_API_VERSION') ?? 'v20.0');
-      await client.sendTemplate({
-        phoneNumberId: campaign.whatsappAccount.phoneNumberId,
-        accessToken: plainToken,
-        to: contact.phone,
-        templateName: campaign.template.name,
-        languageCode: campaign.template.language,
-        components: [],
+    // Re-checked at send time: Meta can pause a template, or the number can be disconnected,
+    // after the campaign was created.
+    const blocker =
+      campaign.template.status !== 'APPROVED'
+        ? `Template "${campaign.template.name}" is ${campaign.template.status.toLowerCase()} in Meta`
+        : campaign.whatsappAccount.status !== 'CONNECTED'
+          ? 'WhatsApp number is not connected'
+          : null;
+    if (blocker) {
+      await this.prisma.campaignContact.update({
+        where: { id: campaignContact.id },
+        data: { status: CampaignContactStatus.FAILED, error: blocker },
       });
+    } else {
+      try {
+        const encKey = this.config.get<string>('WHATSAPP_TOKEN_ENCRYPTION_KEY')!;
+        const plainToken = decryptToken(
+          { iv: campaign.whatsappAccount.iv, authTag: campaign.whatsappAccount.authTag, encryptedToken: campaign.whatsappAccount.encryptedToken },
+          encKey,
+        );
+        const client = new WhatsAppClient(this.config.get<string>('WHATSAPP_API_VERSION') ?? 'v20.0');
+        const result = await client.sendTemplate({
+          phoneNumberId: campaign.whatsappAccount.phoneNumberId,
+          accessToken: plainToken,
+          to: contact.phone,
+          templateName: campaign.template.name,
+          languageCode: campaign.template.language,
+          components: [],
+        });
+        const metaMessageId = result.messages?.[0]?.id ?? null;
+        const sentAt = new Date();
 
-      await this.prisma.campaignContact.update({
-        where: { id: campaignContact.id },
-        data: { status: CampaignContactStatus.SENT, sentAt: new Date() },
-      });
-    } catch (err) {
-      this.logger.error(`Campaign send failed for contact ${contactId}: ${err}`);
-      await this.prisma.campaignContact.update({
-        where: { id: campaignContact.id },
-        data: { status: CampaignContactStatus.FAILED, error: String(err) },
-      });
+        await this.prisma.campaignContact.update({
+          where: { id: campaignContact.id },
+          data: { status: CampaignContactStatus.SENT, sentAt, metaMessageId },
+        });
+        await this.recordInInbox(organizationId, campaign, contact.id, metaMessageId, sentAt);
+      } catch (err) {
+        this.logger.error(`Campaign send failed for contact ${contactId}: ${describeSendError(err)}`);
+        await this.prisma.campaignContact.update({
+          where: { id: campaignContact.id },
+          data: { status: CampaignContactStatus.FAILED, error: describeSendError(err) },
+        });
+      }
     }
 
     // Mark campaign completed if all contacts processed
@@ -93,4 +113,40 @@ export class CampaignSendConsumer extends WorkerHost {
       });
     }
   }
+
+  /** Shows the campaign message in the customer's inbox thread, so replies have context. */
+  private async recordInInbox(
+    organizationId: string,
+    campaign: { whatsappAccountId: string; template: { name: string; language: string } },
+    contactId: string,
+    metaMessageId: string | null,
+    sentAt: Date,
+  ) {
+    const conversation = await this.conversations.findOrCreate(
+      { organizationId, contactId, whatsappAccountId: campaign.whatsappAccountId },
+      'RESOLVED',
+    );
+    await this.prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        organizationId,
+        direction: 'OUTBOUND',
+        type: 'template',
+        content: { templateName: campaign.template.name, language: campaign.template.language },
+        metaMessageId,
+        status: 'SENT',
+        sentAt,
+        createdAt: sentAt,
+      },
+    });
+    await this.conversations.touch(conversation.id, conversation.lastMessageAt, sentAt);
+  }
+}
+
+function describeSendError(err: unknown): string {
+  if (err instanceof WhatsAppApiError) {
+    const meta = (err.body as { error?: { message?: string; error_user_msg?: string } }).error;
+    return meta?.error_user_msg ?? meta?.message ?? `Meta returned HTTP ${err.status}`;
+  }
+  return err instanceof Error ? err.message : String(err);
 }

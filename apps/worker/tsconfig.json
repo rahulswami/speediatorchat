@@ -10,8 +10,9 @@
     "declarationMap": false,
     "paths": {
       "@speediator/prisma": ["../../packages/prisma/src/index.ts"],
+      "@speediator/types": ["../../packages/types/src/index.ts"],
       "@speediator/whatsapp": ["../../packages/whatsapp/src/index.ts"]
     }
   },
-  "include": ["src/**/*", "../../packages/prisma/src/**/*", "../../packages/whatsapp/src/**/*"]
+  "include": ["src/**/*", "../../packages/prisma/src/**/*", "../../packages/types/src/**/*", "../../packages/whatsapp/src/**/*"]
 }

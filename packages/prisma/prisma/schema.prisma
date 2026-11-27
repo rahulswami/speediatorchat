@@ -82,6 +82,8 @@ enum CampaignStatus {
 enum CampaignContactStatus {
   PENDING
   SENT
+  DELIVERED
+  READ
   FAILED
   SKIPPED_OPTED_OUT
   SKIPPED_NO_SESSION
@@ -482,13 +484,17 @@ model Campaign {
 }
 
 model CampaignContact {
-  id         String                @id @default(uuid())
-  campaignId String
-  contactId  String
-  status     CampaignContactStatus @default(PENDING)
-  error      String?
-  sentAt     DateTime?
-  createdAt  DateTime              @default(now())
+  id            String                @id @default(uuid())
+  campaignId    String
+  contactId     String
+  status        CampaignContactStatus @default(PENDING)
+  error         String?
+  // Meta's wamid for the sent template, matched against status webhooks.
+  metaMessageId String?               @unique
+  sentAt        DateTime?
+  deliveredAt   DateTime?
+  readAt        DateTime?
+  createdAt     DateTime              @default(now())
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)

@@ -45,6 +45,10 @@ COPY --from=builder /app/packages/prisma/prisma ./packages/prisma/prisma
 COPY --from=builder /app/packages/prisma/dist ./packages/prisma/dist
 COPY --from=builder /app/packages/prisma/node_modules ./packages/prisma/node_modules
 
+COPY --from=builder /app/packages/types/package.json ./packages/types/
+COPY --from=builder /app/packages/types/dist ./packages/types/dist
+COPY --from=builder /app/packages/types/node_modules ./packages/types/node_modules
+
 COPY --from=builder /app/packages/whatsapp/package.json ./packages/whatsapp/
 COPY --from=builder /app/packages/whatsapp/dist ./packages/whatsapp/dist
 COPY --from=builder /app/packages/whatsapp/node_modules ./packages/whatsapp/node_modules

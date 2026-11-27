@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignStatus } from '@speediator/prisma';
+import { audienceWhere } from '@speediator/types';
 
 export const CAMPAIGN_FANOUT_QUEUE = 'campaign-fanout';
 export const CAMPAIGN_SEND_QUEUE = 'campaign-send';
@@ -29,17 +30,21 @@ export class CampaignFanOutConsumer extends WorkerHost {
       return;
     }
 
-    const filter = campaign.audienceFilter as Record<string, unknown>;
-    const tagIds = (filter.tagIds as string[] | undefined) ?? [];
-
     const contacts = await this.prisma.contact.findMany({
-      where: {
-        organizationId,
-        optedIn: true,
-        ...(tagIds.length > 0 ? { tagMap: { some: { tagId: { in: tagIds } } } } : {}),
-      },
+      where: audienceWhere(organizationId, campaign.audienceFilter),
       select: { id: true },
     });
+
+    // Nothing to send would otherwise leave the campaign RUNNING forever: completion is
+    // normally detected by the last send job.
+    if (contacts.length === 0) {
+      await this.prisma.campaign.update({
+        where: { id: campaignId },
+        data: { status: CampaignStatus.COMPLETED, completedAt: new Date() },
+      });
+      this.logger.warn(`Campaign ${campaignId}: no opted-in contacts match the audience`);
+      return;
+    }
 
     // Upsert campaign contacts and enqueue per-contact send jobs
     for (const contact of contacts) {

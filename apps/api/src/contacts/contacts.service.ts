@@ -69,6 +69,21 @@ export class ContactsService {
     return { items, total, page, limit };
   }
 
+  /** Tags with how many opted-in contacts each would reach in a campaign. */
+  async listTags(organizationId: string) {
+    const tags = await this.prisma.contactTag.findMany({
+      where: { organizationId },
+      orderBy: { name: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        color: true,
+        _count: { select: { contacts: { where: { contact: { optedIn: true, optedOut: false } } } } },
+      },
+    });
+    return tags.map(({ _count, ...t }) => ({ ...t, optedInCount: _count.contacts }));
+  }
+
   async get(organizationId: string, id: string) {
     const contact = await this.prisma.contact.findFirst({
       where: { id, organizationId },

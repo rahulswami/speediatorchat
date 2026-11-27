@@ -6,6 +6,7 @@ import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { AudiencePicker, type AudienceFilter } from './audience-picker';
 
 interface WhatsappAccount {
   id: string;
@@ -42,6 +43,14 @@ export default function NewCampaignPage() {
   const [syncNote, setSyncNote] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [audience, setAudience] = useState<{ filter: AudienceFilter | null; count: number | null }>({
+    filter: { mode: 'all' },
+    count: null,
+  });
+  const onAudienceChange = useCallback(
+    (filter: AudienceFilter | null, count: number | null) => setAudience({ filter, count }),
+    [],
+  );
 
   useEffect(() => {
     fetch('/api/whatsapp/accounts', { cache: 'no-store' })
@@ -111,10 +120,11 @@ export default function NewCampaignPage() {
     setLoading(true);
     setError('');
     try {
-      const body: Record<string, string> = {
+      const body: Record<string, unknown> = {
         name: form.name,
         whatsappAccountId: form.whatsappAccountId,
         templateId: form.templateId,
+        audienceFilter: audience.filter,
       };
       if (form.scheduledAt) body.scheduledAt = new Date(form.scheduledAt).toISOString();
 
@@ -229,6 +239,11 @@ export default function NewCampaignPage() {
           </div>
         )}
 
+        <div className="space-y-2">
+          <Label>Who receives it</Label>
+          <AudiencePicker onChange={onAudienceChange} />
+        </div>
+
         <div className="space-y-1">
           <Label htmlFor="sched">Schedule (optional)</Label>
           <Input
@@ -238,12 +253,9 @@ export default function NewCampaignPage() {
             onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })}
           />
         </div>
-        <p className="text-xs text-muted-foreground">
-          Only contacts who opted in to WhatsApp messages will receive this campaign.
-        </p>
         {error && <p className="text-sm text-destructive">{error}</p>}
         <div className="flex gap-3">
-          <Button type="submit" disabled={loading || !form.templateId}>
+          <Button type="submit" disabled={loading || !form.templateId || !audience.filter}>
             {loading ? 'Creating…' : 'Create campaign'}
           </Button>
           <Button type="button" variant="outline" onClick={() => router.back()}>
