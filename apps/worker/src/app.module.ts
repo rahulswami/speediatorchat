@@ -7,6 +7,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { HealthController } from './health/health.controller';
 import { PrismaService } from './prisma/prisma.service';
 import { ContactsService } from './contacts/contacts.service';
+import { CoexistenceService } from './coexistence/coexistence.service';
 import { ConversationsService } from './conversations/conversations.service';
 import { WebhookEventsConsumer } from './consumers/webhook-events.consumer';
 import { CampaignFanOutConsumer, CAMPAIGN_FANOUT_QUEUE, CAMPAIGN_SEND_QUEUE } from './consumers/campaign-fanout.consumer';
@@ -40,6 +41,7 @@ const WEBHOOK_QUEUE = 'webhook-events';
     PrismaService,
     ContactsService,
     ConversationsService,
+    CoexistenceService,
     WebhookEventsConsumer,
     CampaignFanOutConsumer,
     CampaignSendConsumer,

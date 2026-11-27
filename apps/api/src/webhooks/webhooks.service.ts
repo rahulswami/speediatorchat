@@ -18,6 +18,25 @@ interface WebhookPayload {
   entry?: Array<{ id?: string; time?: number; changes?: WebhookChange[] }>;
 }
 
+interface BareValue {
+  messaging_product?: string;
+  metadata?: { phone_number_id?: string };
+  history?: unknown[];
+}
+
+/**
+ * Meta's reference shows the "history sharing turned off" webhook as a bare value with no
+ * entry/changes wrapper. Wrap it so it's routed like every other change.
+ */
+function normalize(payload: WebhookPayload & BareValue): WebhookPayload {
+  if (payload.entry || !payload.history || !payload.metadata?.phone_number_id) return payload;
+  const { messaging_product, metadata, history } = payload;
+  return {
+    object: 'whatsapp_business_account',
+    entry: [{ changes: [{ field: 'history', value: { messaging_product, metadata, history } as WebhookChange['value'] }] }],
+  };
+}
+
 @Injectable()
 export class WebhooksService {
   private readonly logger = new Logger(WebhooksService.name);
@@ -33,7 +52,7 @@ export class WebhooksService {
    * organization and the consumer handles exactly one change per event.
    */
   async handleIncoming(payload: object): Promise<void> {
-    const raw = payload as WebhookPayload;
+    const raw = normalize(payload as WebhookPayload & BareValue);
 
     for (const entry of raw.entry ?? []) {
       for (const change of entry.changes ?? []) {

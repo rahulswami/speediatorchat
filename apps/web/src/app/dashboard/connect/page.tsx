@@ -23,7 +23,17 @@ interface WhatsappAccount {
   registeredAt: string | null;
   contactsSyncRequestedAt: string | null;
   historySyncRequestedAt: string | null;
+  historySyncProgress: number | null;
+  historySyncDeclinedAt: string | null;
   lastSetupError: string | null;
+}
+
+function historyNote(a: WhatsappAccount): string | null {
+  if (!a.isOnBizApp || !a.historySyncRequestedAt) return null;
+  if (a.historySyncDeclinedAt) return 'Chat history sharing is turned off in the WhatsApp Business app';
+  if (a.historySyncProgress === null) return 'Waiting for chat history from WhatsApp…';
+  if (a.historySyncProgress >= 100) return 'Chat history imported';
+  return `Importing chat history: ${a.historySyncProgress}%`;
 }
 
 type Phase =
@@ -259,6 +269,7 @@ export default function ConnectWhatsAppPage() {
                     {a.isOnBizApp && ' · also on WhatsApp Business app'}
                     {a.connectionMethod === 'MANUAL' && ' · connected manually'}
                   </p>
+                  {historyNote(a) && <p className="text-xs text-muted-foreground mt-0.5">{historyNote(a)}</p>}
                   {a.status !== 'CONNECTED' && a.lastSetupError && (
                     <p className="text-xs text-amber-700 mt-1">{a.lastSetupError}</p>
                   )}

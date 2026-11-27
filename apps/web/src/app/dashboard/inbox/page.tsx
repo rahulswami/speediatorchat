@@ -15,10 +15,22 @@ interface Message {
   id: string;
   direction: 'INBOUND' | 'OUTBOUND';
   type: string;
-  content: { body?: string; [key: string]: unknown };
+  content: { body?: string; caption?: string; [key: string]: unknown };
   status: string;
+  source?: 'PLATFORM' | 'BUSINESS_APP' | 'HISTORY';
   createdAt: string;
 }
+
+function messageText(msg: Message): string {
+  if (msg.type === 'revoked') return 'This message was deleted';
+  if (msg.type === 'media_placeholder') return '[Media from the WhatsApp Business app]';
+  return msg.content?.body ?? msg.content?.caption ?? `[${msg.type}]`;
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  BUSINESS_APP: 'Sent from WhatsApp Business app',
+  HISTORY: 'Imported from WhatsApp Business app',
+};
 
 // Simple date formatter without dependency
 function timeAgo(date: string | null) {
@@ -160,18 +172,23 @@ export default function InboxPage() {
                   key={msg.id}
                   className={`flex ${msg.direction === 'OUTBOUND' ? 'justify-end' : 'justify-start'}`}
                 >
-                  <div
-                    className={`max-w-xs px-3 py-2 rounded-lg text-sm ${
-                      msg.direction === 'OUTBOUND'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted'
-                    }`}
-                  >
-                    {msg.content?.body ?? `[${msg.type}]`}
-                    {msg.direction === 'OUTBOUND' && (
-                      <span className="ml-2 opacity-70">
-                        <CheckCheck className="w-3 h-3 inline" />
-                      </span>
+                  <div className={`max-w-xs flex flex-col ${msg.direction === 'OUTBOUND' ? 'items-end' : 'items-start'}`}>
+                    <div
+                      className={`px-3 py-2 rounded-lg text-sm ${
+                        msg.direction === 'OUTBOUND'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted'
+                      } ${msg.type === 'revoked' || msg.type === 'media_placeholder' ? 'italic opacity-80' : ''}`}
+                    >
+                      {messageText(msg)}
+                      {msg.direction === 'OUTBOUND' && (
+                        <span className="ml-2 opacity-70">
+                          <CheckCheck className="w-3 h-3 inline" />
+                        </span>
+                      )}
+                    </div>
+                    {msg.source && SOURCE_LABEL[msg.source] && (
+                      <span className="text-[10px] text-muted-foreground mt-0.5">{SOURCE_LABEL[msg.source]}</span>
                     )}
                   </div>
                 </div>

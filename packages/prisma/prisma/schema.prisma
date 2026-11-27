@@ -42,6 +42,12 @@ enum MessageStatus {
   FAILED
 }
 
+enum MessageSource {
+  PLATFORM // sent or received through Speediator / Cloud API
+  BUSINESS_APP // sent from the WhatsApp Business app (coexistence echo)
+  HISTORY // imported from the WhatsApp Business app's chat history
+}
+
 enum ContactImportStatus {
   PENDING
   PROCESSING
@@ -236,6 +242,9 @@ model WhatsappAccount {
   registeredAt            DateTime?
   contactsSyncRequestedAt DateTime?
   historySyncRequestedAt  DateTime?
+  historySyncProgress     Int?
+  // The business turned off history sharing in the WhatsApp Business app.
+  historySyncDeclinedAt   DateTime?
   lastSetupError          String?
   disconnectedAt          DateTime?
 
@@ -345,6 +354,7 @@ model Message {
   content        Json
   metaMessageId  String?          @unique
   status         MessageStatus    @default(PENDING)
+  source         MessageSource    @default(PLATFORM)
   sentAt         DateTime?
   deliveredAt    DateTime?
   readAt         DateTime?

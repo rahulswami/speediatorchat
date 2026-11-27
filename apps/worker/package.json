@@ -4,7 +4,9 @@
   "scripts": {
     "dev": "nest start --watch",
     "build": "nest build",
-    "start": "node dist/apps/worker/src/main"
+    "start": "node dist/apps/worker/src/main",
+    "test": "jest",
+    "test:e2e": "jest --config test/jest-e2e.json --runInBand --forceExit"
   },
   "dependencies": {
     "@nestjs/bullmq": "^10.2.3",
@@ -24,7 +26,33 @@
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.0",
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.15",
     "typescript": "^5.6.0"
+  },
+  "jest": {
+    "moduleFileExtensions": [
+      "ts",
+      "js",
+      "json"
+    ],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "testEnvironment": "node",
+    "transform": {
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "tsconfig": "<rootDir>/../tsconfig.json"
+        }
+      ]
+    },
+    "moduleNameMapper": {
+      "@speediator/prisma": "<rootDir>/../../../packages/prisma/src/index.ts",
+      "@speediator/types": "<rootDir>/../../../packages/types/src/index.ts",
+      "@speediator/whatsapp": "<rootDir>/../../../packages/whatsapp/src/index.ts"
+    }
   }
 }

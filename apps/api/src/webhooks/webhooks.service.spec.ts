@@ -77,6 +77,21 @@ describe('WebhooksService.handleIncoming', () => {
     expect(created[0]).toMatchObject({ organizationId: 'org-b', whatsappAccountId: 'acc-b' });
   });
 
+  it('accepts the unwrapped history-declined payload from Meta\'s reference', async () => {
+    await service.handleIncoming({
+      messaging_product: 'whatsapp',
+      metadata: { display_phone_number: '15550783881', phone_number_id: 'PN_A' },
+      history: [{ errors: [{ code: 2593109, title: 'History sync is turned off by the business' }] }],
+    });
+
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({ organizationId: 'org-a', whatsappAccountId: 'acc-a' });
+    expect(created[0].payload.entry[0].changes[0]).toMatchObject({
+      field: 'history',
+      value: { history: [{ errors: [{ code: 2593109 }] }] },
+    });
+  });
+
   it('drops changes for numbers no organization has connected', async () => {
     await service.handleIncoming({
       object: 'whatsapp_business_account',

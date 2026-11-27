@@ -55,6 +55,8 @@ export const ACCOUNT_PUBLIC_FIELDS = {
   registeredAt: true,
   contactsSyncRequestedAt: true,
   historySyncRequestedAt: true,
+  historySyncProgress: true,
+  historySyncDeclinedAt: true,
   lastSetupError: true,
   createdAt: true,
 } as const;

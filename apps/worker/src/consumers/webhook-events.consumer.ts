@@ -5,6 +5,16 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ContactsService } from '../contacts/contacts.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { CoexistenceService } from '../coexistence/coexistence.service';
+import {
+  extractContent,
+  isFromBusiness,
+  toDate,
+  type EchoValue,
+  type HistoryValue,
+  type StateSyncValue,
+  type WaMessage,
+} from '../coexistence/coexistence-payloads';
 
 const WEBHOOK_QUEUE = 'webhook-events';
 // Meta's docs don't say which of these fires when a customer removes our access, so both count.
@@ -16,6 +26,7 @@ interface AccountUpdateValue {
 }
 
 const OPT_OUT_KEYWORDS = /^(stop|unsubscribe|opt\s*out)$/i;
+const SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 @Processor(WEBHOOK_QUEUE)
 export class WebhookEventsConsumer extends WorkerHost {
@@ -26,6 +37,7 @@ export class WebhookEventsConsumer extends WorkerHost {
     private readonly contacts: ContactsService,
     private readonly conversations: ConversationsService,
     private readonly events: EventEmitter2,
+    private readonly coexistence: CoexistenceService,
   ) {
     super();
   }
@@ -86,6 +98,7 @@ export class WebhookEventsConsumer extends WorkerHost {
               timestamp: string;
             }>;
             contacts?: Array<{ profile?: { name?: string } }>;
+            metadata?: { display_phone_number?: string; phone_number_id?: string };
           };
         }>;
       }>;
@@ -101,13 +114,31 @@ export class WebhookEventsConsumer extends WorkerHost {
     }
 
     const account = event.whatsappAccountId
-      ? await this.prisma.whatsappAccount.findUnique({ where: { id: event.whatsappAccountId } })
+      ? await this.prisma.whatsappAccount.findFirst({
+          where: { id: event.whatsappAccountId, organizationId: event.organizationId },
+        })
       : null;
+    if (!account) return;
+
+    switch (change.field) {
+      case 'smb_app_state_sync':
+        return this.coexistence.syncContacts(event.organizationId, value as StateSyncValue);
+      case 'smb_message_echoes':
+        return this.coexistence.mirrorEchoes(event.organizationId, account.id, value as EchoValue);
+      case 'history':
+        return this.coexistence.importHistory(event.organizationId, account.id, value as HistoryValue);
+    }
 
     // Process inbound messages
-    if (value.messages?.length && account) {
+    if (value.messages?.length) {
       for (const msg of value.messages) {
-        await this.processInboundMessage(event.organizationId, account.id, msg, value.contacts?.[0]);
+        await this.processInboundMessage(
+          event.organizationId,
+          account.id,
+          msg,
+          value.contacts?.[0],
+          value.metadata?.display_phone_number,
+        );
       }
     }
 
@@ -140,80 +171,67 @@ export class WebhookEventsConsumer extends WorkerHost {
   private async processInboundMessage(
     organizationId: string,
     whatsappAccountId: string,
-    msg: { id: string; from: string; type: string; text?: { body: string }; timestamp: string; [key: string]: unknown },
+    msg: WaMessage & { from: string; timestamp: string },
     contactInfo?: { profile?: { name?: string } },
+    businessPhone?: string,
   ) {
-    // Idempotency: skip if already processed
     const existing = await this.prisma.message.findUnique({ where: { metaMessageId: msg.id } });
     if (existing) {
-      this.logger.debug(`Message ${msg.id} already processed, skipping`);
+      // Coexistence history sends media as a placeholder, then the file on this webhook.
+      if (existing.type === 'media_placeholder' && existing.organizationId === organizationId) {
+        await this.prisma.message.update({
+          where: { id: existing.id },
+          data: { type: msg.type, content: extractContent(msg) },
+        });
+        this.logger.debug(`Filled in history media for ${msg.id}`);
+      } else {
+        this.logger.warn(`Message ${msg.id} already processed, skipping`);
+      }
+      return;
+    }
+
+    // History media the business itself sent can arrive here too. It isn't a customer
+    // message, so it must not create a contact for the business's own number.
+    if (isFromBusiness(msg, businessPhone)) {
+      this.logger.warn(`Skipping ${msg.id}: sent by the business number, not a customer`);
       return;
     }
 
     const phone = msg.from;
     const name = contactInfo?.profile?.name;
-
-    // Upsert contact
     const contact = await this.contacts.upsertByPhone(organizationId, phone, name);
 
-    // Check for opt-out
     if (msg.type === 'text' && msg.text?.body && OPT_OUT_KEYWORDS.test(msg.text.body.trim())) {
       await this.contacts.setOptOut(organizationId, phone, true);
       this.logger.log(`Contact ${phone} opted out`);
     }
 
-    // Session window: 24 hours from inbound message
-    const sessionExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-    // Upsert conversation
+    // The 24h window runs from when the customer sent the message, not from when we got it:
+    // an old message delivered late (e.g. history media) must not reopen the window.
+    const sentAt = toDate(msg.timestamp);
     const conversation = await this.conversations.upsert({
       organizationId,
       contactId: contact.id,
       whatsappAccountId,
-      sessionExpiresAt,
+      sessionExpiresAt: new Date(sentAt.getTime() + SESSION_WINDOW_MS),
+      messageAt: sentAt,
     });
 
-    // Build content object based on message type
-    const content = this.extractContent(msg);
-
-    // Create message
     const message = await this.prisma.message.create({
       data: {
         conversationId: conversation.id,
         organizationId,
         direction: 'INBOUND',
         type: msg.type,
-        content,
+        content: extractContent(msg),
         metaMessageId: msg.id,
         status: 'DELIVERED',
+        createdAt: sentAt,
       },
     });
 
-    await this.prisma.conversation.update({
-      where: { id: conversation.id },
-      data: { lastMessageAt: new Date() },
-    });
-
-    // Emit real-time event
     this.events.emit('inbox.message', { organizationId, conversation, message, contact });
     this.logger.debug(`Processed inbound message ${msg.id} from ${phone}`);
-  }
-
-  private extractContent(msg: { type: string; text?: { body: string }; [key: string]: unknown }): object {
-    switch (msg.type) {
-      case 'text':
-        return { body: msg.text?.body ?? '' };
-      case 'image':
-      case 'audio':
-      case 'video':
-      case 'document':
-      case 'sticker':
-        return (msg[msg.type] as object) ?? {};
-      case 'location':
-        return (msg.location as object) ?? {};
-      default:
-        return { raw: msg };
-    }
   }
 
   private async processStatusUpdate(status: { id: string; status: string; timestamp: string }) {
