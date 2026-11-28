@@ -6,6 +6,7 @@ import {
   MetaTemplateApiResponse,
   PhoneNumberDetails,
   SmbAppDataSyncType,
+  UploadFileParams,
 } from './types';
 
 const DEFAULT_API_VERSION = 'v20.0';
@@ -66,6 +67,23 @@ export class WhatsAppApiError extends Error {
     super(`WhatsApp API error ${status}: ${JSON.stringify(body)}`);
     this.name = 'WhatsAppApiError';
   }
+}
+
+/**
+ * One readable line for a Meta error: the code and Meta's own details, which say far more than
+ * the generic message (for example 132000, "number of parameters does not match").
+ */
+export function describeMetaError(err: unknown): string {
+  if (!(err instanceof WhatsAppApiError)) return err instanceof Error ? err.message : String(err);
+  const e = (err.body as {
+    error?: { message?: string; error_user_msg?: string; code?: number; error_data?: { details?: string }; fbtrace_id?: string };
+  }).error;
+  if (!e) return `Meta returned HTTP ${err.status}`;
+  const text = e.error_user_msg ?? e.error_data?.details ?? e.message ?? `HTTP ${err.status}`;
+  const extra = e.error_data?.details && e.error_data.details !== text ? ` ${e.error_data.details}` : '';
+  const code = e.code !== undefined && !text.startsWith(`(#${e.code})`) ? `(#${e.code}) ` : '';
+  const trace = e.fbtrace_id ? ` [trace ${e.fbtrace_id}]` : '';
+  return `${code}${text}${extra}${trace}`;
 }
 
 export class WhatsAppClient {
@@ -137,6 +155,47 @@ export class WhatsAppClient {
       },
     );
     return res.json();
+  }
+
+  /**
+   * Resumable Upload API: turns a sample file into the `header_handle` a media-header template
+   * needs at creation. The handle only works for template creation, not for sending.
+   */
+  async uploadTemplateSample(params: UploadFileParams & { appId: string }): Promise<string> {
+    const { appId, accessToken, fileName, fileType, bytes } = params;
+    const qs = new URLSearchParams({ file_name: fileName, file_length: String(bytes.length), file_type: fileType });
+    const session = await fetchWithRetry(`${this.baseUrl}/${appId}/uploads?${qs}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const { id } = (await session.json()) as { id?: string };
+    if (!id?.startsWith('upload:')) throw new WhatsAppApiError(502, { error: { message: 'Meta did not start an upload session' } });
+
+    const res = await fetchWithRetry(`${this.baseUrl}/${id}`, {
+      method: 'POST',
+      headers: { Authorization: `OAuth ${accessToken}`, file_offset: '0' },
+      body: bytes,
+    });
+    const { h } = (await res.json()) as { h?: string };
+    if (!h) throw new WhatsAppApiError(502, { error: { message: 'Meta did not return an upload handle' } });
+    return h;
+  }
+
+  /** Uploads media to send in messages. Meta keeps it, and the returned id works, for 30 days. */
+  async uploadMedia(params: UploadFileParams & { phoneNumberId: string }): Promise<string> {
+    const { phoneNumberId, accessToken, fileName, fileType, bytes } = params;
+    const form = new FormData();
+    form.append('messaging_product', 'whatsapp');
+    form.append('type', fileType);
+    form.append('file', new Blob([bytes], { type: fileType }), fileName);
+    const res = await fetchWithRetry(`${this.baseUrl}/${phoneNumberId}/media`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: form,
+    });
+    const { id } = (await res.json()) as { id?: string };
+    if (!id) throw new WhatsAppApiError(502, { error: { message: 'Meta did not return a media id' } });
+    return id;
   }
 
   /** Reads every page: Meta returns templates a page at a time (25 by default). */

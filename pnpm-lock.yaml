@@ -323,6 +323,9 @@ importers:
       '@radix-ui/react-slot':
         specifier: ^1.1.0
         version: 1.5.0(@types/react@18.3.31)(react@18.3.1)
+      '@speediator/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       class-variance-authority:
         specifier: ^0.7.0
         version: 0.7.1

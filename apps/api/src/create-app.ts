@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
+import { MAX_UPLOAD_BYTES } from './common/uploaded-file';
 
 export function createFastifyAdapter() {
   const env = process.env.NODE_ENV;
@@ -42,6 +43,13 @@ export async function configureApp(app: INestApplication) {
         done(err as Error, undefined);
       }
     },
+  );
+
+  // Media files for templates and campaigns arrive as the raw request body.
+  fastify.addContentTypeParser(
+    'application/octet-stream',
+    { parseAs: 'buffer', bodyLimit: MAX_UPLOAD_BYTES + 1024 },
+    (_req, body: Buffer, done) => done(null, body),
   );
 
   await fastify.ready();

@@ -3,6 +3,7 @@ export type { EncryptedValue } from './crypto';
 export {
   WhatsAppClient,
   WhatsAppApiError,
+  describeMetaError,
   whatsAppClient,
   WhatsAppOnboardingClient,
   whatsAppOnboardingClient,
@@ -18,4 +19,5 @@ export type {
   MetaTemplateApiResponse,
   PhoneNumberDetails,
   SmbAppDataSyncType,
+  UploadFileParams,
 } from './types';

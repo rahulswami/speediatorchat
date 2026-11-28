@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Search, UserX, UserCheck, Plus, Upload } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Search, UserX, UserCheck, Plus, Upload, Pencil, Trash2 } from 'lucide-react';
 import { AddContactDialog } from './add-contact-dialog';
 import { ImportContactsDialog } from './import-contacts-dialog';
+import { EditContactDialog } from './edit-contact-dialog';
+import { apiErrorMessage } from './api-error';
 
 interface Contact {
   id: string;
@@ -31,6 +33,9 @@ export default function ContactsPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState<'add' | 'import' | null>(null);
+  const [editing, setEditing] = useState<Contact | null>(null);
+  const [error, setError] = useState('');
+  const searchTimer = useRef<ReturnType<typeof setTimeout>>();
 
   async function load(q = '') {
     setLoading(true);
@@ -52,8 +57,20 @@ export default function ContactsPage() {
   function handleSearch(e: React.ChangeEvent<HTMLInputElement>) {
     const v = e.target.value;
     setSearch(v);
-    const timeout = setTimeout(() => load(v), 300);
-    return () => clearTimeout(timeout);
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => load(v), 300);
+  }
+
+  async function remove(c: Contact) {
+    const label = c.name ? `${c.name} (${c.phone})` : c.phone;
+    if (!confirm(`Delete ${label}? Their conversations and campaign history are deleted too. This cannot be undone.`)) return;
+    setError('');
+    const res = await fetch(`/api/contacts/${c.id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      setError(apiErrorMessage(await res.json().catch(() => ({})), 'Could not delete the contact'));
+      return;
+    }
+    load(search);
   }
 
   return (
@@ -85,6 +102,14 @@ export default function ContactsPage() {
           onSaved={() => { setDialog(null); load(search); }}
         />
       )}
+      {editing && (
+        <EditContactDialog
+          contact={editing}
+          onClose={() => { setEditing(null); load(search); }}
+          onSaved={() => { setEditing(null); load(search); }}
+        />
+      )}
+      {error && <p className="text-sm text-destructive mb-3">{error}</p>}
       {dialog === 'import' && (
         <ImportContactsDialog onClose={() => setDialog(null)} onImported={() => load(search)} />
       )}
@@ -114,6 +139,7 @@ export default function ContactsPage() {
                 <th className="px-4 py-3 text-left font-medium">Tags</th>
                 <th className="px-4 py-3 text-left font-medium">Opt-in</th>
                 <th className="px-4 py-3 text-left font-medium">Last seen</th>
+                <th className="px-4 py-3 text-right font-medium sr-only">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -154,6 +180,26 @@ export default function ContactsPage() {
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {timeAgo(c.lastSeenAt)}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex justify-end gap-1">
+                      <button
+                        onClick={() => setEditing(c)}
+                        aria-label={`Edit ${c.name ?? c.phone}`}
+                        title="Edit"
+                        className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => remove(c)}
+                        aria-label={`Delete ${c.name ?? c.phone}`}
+                        title="Delete"
+                        className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-destructive"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -202,29 +202,35 @@ export class ContactsService {
     };
   }
 
-  async update(organizationId: string, id: string, data: { name?: string; optedIn?: boolean }) {
+  async update(
+    organizationId: string,
+    id: string,
+    data: { name?: string | null; optedIn?: boolean; optInSource?: string },
+  ) {
     const contact = await this.prisma.contact.findFirst({ where: { id, organizationId } });
     if (!contact) throw new NotFoundException('Contact not found');
 
-    const update: Parameters<typeof this.prisma.contact.update>[0]['data'] = { name: data.name };
-    if (data.optedIn === true) {
+    const update: Parameters<typeof this.prisma.contact.update>[0]['data'] = {};
+    if (data.name !== undefined) update.name = data.name;
+    // Only a change of consent touches the opt-in record, so editing a name keeps its history.
+    if (data.optedIn === true && (!contact.optedIn || contact.optedOut)) {
       update.optedIn = true;
       update.optedOut = false;
       update.optedInAt = new Date();
-      update.optInSource = MANUAL_OPT_IN_SOURCE;
-    } else if (data.optedIn === false) {
+      update.optInSource = data.optInSource || MANUAL_OPT_IN_SOURCE;
+    } else if (data.optedIn === false && !contact.optedOut) {
       update.optedIn = false;
       update.optedOut = true;
       update.optedOutAt = new Date();
     }
 
-    return this.prisma.contact.update({ where: { id }, data: update });
+    return this.prisma.contact.update({ where: { id: contact.id }, data: update });
   }
 
   async delete(organizationId: string, id: string) {
     const contact = await this.prisma.contact.findFirst({ where: { id, organizationId } });
     if (!contact) throw new NotFoundException('Contact not found');
-    await this.prisma.contact.delete({ where: { id } });
+    await this.prisma.contact.delete({ where: { id: contact.id } });
   }
 
   async eraseGdpr(organizationId: string, id: string) {

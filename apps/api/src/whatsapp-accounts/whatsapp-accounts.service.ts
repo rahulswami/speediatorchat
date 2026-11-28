@@ -1,7 +1,9 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import { encryptToken, decryptToken } from '@speediator/whatsapp';
+import { encryptToken, decryptToken, whatsAppClient } from '@speediator/whatsapp';
+import { rethrowMetaError } from '../common/meta-error';
+import type { UploadedFile } from '../common/uploaded-file';
 import { ACCOUNT_PUBLIC_FIELDS } from './embedded-signup.service';
 
 export interface ConnectAccountDto {
@@ -80,6 +82,20 @@ export class WhatsappAccountsService {
       { encryptedToken: account.encryptedToken, iv: account.iv, authTag: account.authTag },
       this.encKey,
     );
+  }
+
+  /** Uploads a file to send as a template's media header. The returned id works for 30 days. */
+  async uploadMedia(organizationId: string, id: string, file: UploadedFile) {
+    const account = await this.prisma.whatsappAccount.findFirst({
+      where: { id, organizationId },
+      select: { id: true, phoneNumberId: true },
+    });
+    if (!account) throw new NotFoundException('Account not found');
+    const accessToken = await this.getDecryptedToken(organizationId, account.id);
+    const mediaId = await whatsAppClient
+      .uploadMedia({ phoneNumberId: account.phoneNumberId, accessToken, fileName: file.fileName, fileType: file.fileType, bytes: file.bytes })
+      .catch(rethrowMetaError('Meta did not accept the file'));
+    return { id: mediaId, format: file.format, fileName: file.fileName };
   }
 
   async findByVerifyToken(verifyToken: string) {

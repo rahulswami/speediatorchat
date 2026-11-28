@@ -6,6 +6,7 @@ import {
   Body,
   Param,
   Query,
+  Headers,
   HttpCode,
   UseGuards,
 } from '@nestjs/common';
@@ -13,17 +14,12 @@ import { z } from 'zod';
 import { TemplatesService } from './templates.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { RequestUser } from '@speediator/types';
+import { NewTemplateSchema, RequestUser } from '@speediator/types';
+import { readUploadedFile } from '../common/uploaded-file';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { TemplateStatus } from '@speediator/prisma';
 
-const CreateTemplateSchema = z.object({
-  whatsappAccountId: z.string().uuid(),
-  name: z.string().min(1).max(512).regex(/^[a-z0-9_]+$/, 'lowercase letters, digits and underscores only'),
-  language: z.string().min(2).max(5),
-  category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']),
-  components: z.array(z.object({}).passthrough()).min(1),
-});
+const HeaderSampleQuerySchema = z.object({ whatsappAccountId: z.string().uuid() });
 
 @UseGuards(JwtAuthGuard)
 @Controller('templates')
@@ -43,9 +39,21 @@ export class TemplatesController {
   @Post()
   async create(
     @CurrentUser() user: RequestUser,
-    @Body(new ZodValidationPipe(CreateTemplateSchema)) body: z.infer<typeof CreateTemplateSchema>,
+    @Body(new ZodValidationPipe(NewTemplateSchema)) body: z.infer<typeof NewTemplateSchema>,
   ) {
     return this.service.create(user.orgId, body);
+  }
+
+  /** Raw file body; see readUploadedFile for the headers it needs. */
+  @Post('header-sample')
+  @HttpCode(200)
+  async headerSample(
+    @CurrentUser() user: RequestUser,
+    @Query(new ZodValidationPipe(HeaderSampleQuerySchema)) query: z.infer<typeof HeaderSampleQuerySchema>,
+    @Headers() headers: Record<string, string>,
+    @Body() body: unknown,
+  ) {
+    return this.service.uploadHeaderSample(user.orgId, query.whatsappAccountId, readUploadedFile(body, headers));
   }
 
   @Post(':whatsappAccountId/sync')

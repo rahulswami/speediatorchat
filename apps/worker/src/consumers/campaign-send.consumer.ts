@@ -3,7 +3,8 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignContactStatus, CampaignStatus } from '@speediator/prisma';
-import { WhatsAppApiError, WhatsAppClient, decryptToken } from '@speediator/whatsapp';
+import { WhatsAppClient, decryptToken, describeMetaError } from '@speediator/whatsapp';
+import { buildSendComponents, parseTemplateVariables } from '@speediator/types';
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConfigService } from '@nestjs/config';
 
@@ -40,7 +41,10 @@ export class CampaignSendConsumer extends WorkerHost {
       return;
     }
 
-    const contact = await this.prisma.contact.findFirst({ where: { id: contactId, organizationId } });
+    const contact = await this.prisma.contact.findFirst({
+      where: { id: contactId, organizationId },
+      include: { attributes: { select: { key: true, value: true } } },
+    });
     if (!contact) return;
 
     const campaignContact = await this.prisma.campaignContact.findFirst({
@@ -58,12 +62,23 @@ export class CampaignSendConsumer extends WorkerHost {
 
     // Re-checked at send time: Meta can pause a template, or the number can be disconnected,
     // after the campaign was created.
+    const { components, missing } = buildSendComponents(
+      campaign.template.components,
+      parseTemplateVariables(campaign.variableMap),
+      {
+        name: contact.name,
+        phone: contact.phone,
+        attributes: Object.fromEntries(contact.attributes.map((a) => [a.key, a.value])),
+      },
+    );
     const blocker =
       campaign.template.status !== 'APPROVED'
         ? `Template "${campaign.template.name}" is ${campaign.template.status.toLowerCase()} in Meta`
         : campaign.whatsappAccount.status !== 'CONNECTED'
           ? 'WhatsApp number is not connected'
-          : null;
+          : missing.length
+            ? `No value for ${missing.join(', ')} and no default value set`
+            : null;
     if (blocker) {
       await this.prisma.campaignContact.update({
         where: { id: campaignContact.id },
@@ -83,7 +98,7 @@ export class CampaignSendConsumer extends WorkerHost {
           to: contact.phone,
           templateName: campaign.template.name,
           languageCode: campaign.template.language,
-          components: [],
+          components,
         });
         const metaMessageId = result.messages?.[0]?.id ?? null;
         const sentAt = new Date();
@@ -94,10 +109,10 @@ export class CampaignSendConsumer extends WorkerHost {
         });
         await this.recordInInbox(organizationId, campaign, contact.id, metaMessageId, sentAt);
       } catch (err) {
-        this.logger.error(`Campaign send failed for contact ${contactId}: ${describeSendError(err)}`);
+        this.logger.error(`Campaign send failed for contact ${contactId}: ${describeMetaError(err)}`);
         await this.prisma.campaignContact.update({
           where: { id: campaignContact.id },
-          data: { status: CampaignContactStatus.FAILED, error: describeSendError(err) },
+          data: { status: CampaignContactStatus.FAILED, error: describeMetaError(err) },
         });
       }
     }
@@ -141,12 +156,4 @@ export class CampaignSendConsumer extends WorkerHost {
     });
     await this.conversations.touch(conversation.id, conversation.lastMessageAt, sentAt);
   }
-}
-
-function describeSendError(err: unknown): string {
-  if (err instanceof WhatsAppApiError) {
-    const meta = (err.body as { error?: { message?: string; error_user_msg?: string } }).error;
-    return meta?.error_user_msg ?? meta?.message ?? `Meta returned HTTP ${err.status}`;
-  }
-  return err instanceof Error ? err.message : String(err);
 }

@@ -4,7 +4,7 @@ import {
 import { z } from 'zod';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { AudienceFilterSchema, RequestUser } from '@speediator/types';
+import { AudienceFilterSchema, RequestUser, TemplateVariablesSchema } from '@speediator/types';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { CampaignsService, RECIPIENT_FILTERS } from './campaigns.service';
 
@@ -19,14 +19,14 @@ const CreateCampaignSchema = z.object({
   whatsappAccountId: z.string().uuid(),
   templateId: z.string().uuid(),
   audienceFilter: AudienceFilterSchema.default({ mode: 'all' }),
-  variableMap: z.record(z.string()).optional(),
+  variableMap: TemplateVariablesSchema.optional(),
   scheduledAt,
 });
 
 const UpdateCampaignSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
   audienceFilter: AudienceFilterSchema.optional(),
-  variableMap: z.record(z.string()).optional(),
+  variableMap: TemplateVariablesSchema.optional(),
   scheduledAt,
 });
 

@@ -2,28 +2,23 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-  Logger,
+  ConflictException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappAccountsService } from '../whatsapp-accounts/whatsapp-accounts.service';
 import { whatsAppClient } from '@speediator/whatsapp';
 import { TemplateStatus, TemplateCategory } from '@speediator/prisma';
-
-export interface CreateTemplateDto {
-  whatsappAccountId: string;
-  name: string;
-  language: string;
-  category: TemplateCategory;
-  components: object[];
-}
+import { buildCreateComponents, type NewTemplateInput } from '@speediator/types';
+import { rethrowMetaError } from '../common/meta-error';
+import type { UploadedFile } from '../common/uploaded-file';
 
 @Injectable()
 export class TemplatesService {
-  private readonly logger = new Logger(TemplatesService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly waAccountsService: WhatsappAccountsService,
+    private readonly config: ConfigService,
   ) {}
 
   async list(organizationId: string, status?: TemplateStatus) {
@@ -41,46 +36,64 @@ export class TemplatesService {
     return template;
   }
 
-  async create(organizationId: string, dto: CreateTemplateDto) {
+  async create(organizationId: string, input: NewTemplateInput) {
     const account = await this.prisma.whatsappAccount.findFirst({
-      where: { id: dto.whatsappAccountId, organizationId },
+      where: { id: input.whatsappAccountId, organizationId },
     });
     if (!account) throw new NotFoundException('WhatsApp account not found');
 
-    // Submit to Meta
-    const accessToken = await this.waAccountsService.getDecryptedToken(
-      organizationId,
-      dto.whatsappAccountId,
-    );
+    const existing = await this.prisma.template.findFirst({
+      where: { organizationId, name: input.name, language: input.language },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new ConflictException(`A template named "${input.name}" in ${input.language} already exists. Pick another name.`);
+    }
 
-    let metaTemplateId: string | undefined;
-    try {
-      const result = await whatsAppClient.createTemplate({
+    const components = buildCreateComponents(input);
+    const accessToken = await this.waAccountsService.getDecryptedToken(organizationId, account.id);
+    // Meta's rejection (bad example, policy, duplicate name in Meta) goes straight back to the user.
+    const result = await whatsAppClient
+      .createTemplate({
         wabaId: account.wabaId,
         accessToken,
-        name: dto.name,
-        language: dto.language,
-        category: dto.category,
-        components: dto.components,
-      });
-      metaTemplateId = result.id;
-    } catch (err) {
-      this.logger.warn(`Meta template submit failed: ${String(err)}`);
-      // Save locally as PENDING even if Meta submission fails in dev
-    }
+        name: input.name,
+        language: input.language,
+        category: input.category,
+        components,
+      })
+      .catch(rethrowMetaError('Meta rejected the template'));
 
     return this.prisma.template.create({
       data: {
         organizationId,
-        whatsappAccountId: dto.whatsappAccountId,
-        name: dto.name,
-        language: dto.language,
-        category: dto.category,
-        components: dto.components,
-        metaTemplateId: metaTemplateId ?? null,
-        status: 'PENDING',
+        whatsappAccountId: account.id,
+        name: input.name,
+        language: input.language,
+        category: input.category,
+        components: components as object[],
+        metaTemplateId: result.id ?? null,
+        status: toTemplateStatus((result as { status?: string }).status ?? 'PENDING'),
+        syncedAt: new Date(),
       },
     });
+  }
+
+  /** Uploads a sample file and returns the handle a media header needs when the template is created. */
+  async uploadHeaderSample(organizationId: string, whatsappAccountId: string, file: UploadedFile) {
+    const appId = this.config.get<string>('META_APP_ID');
+    if (!appId) throw new BadRequestException('Set META_APP_ID on the server to create templates with a media header');
+    const account = await this.prisma.whatsappAccount.findFirst({
+      where: { id: whatsappAccountId, organizationId },
+      select: { id: true },
+    });
+    if (!account) throw new NotFoundException('WhatsApp account not found');
+
+    const accessToken = await this.waAccountsService.getDecryptedToken(organizationId, account.id);
+    const handle = await whatsAppClient
+      .uploadTemplateSample({ appId, accessToken, fileName: file.fileName, fileType: file.fileType, bytes: file.bytes })
+      .catch(rethrowMetaError('Meta did not accept the file'));
+    return { handle, format: file.format, fileName: file.fileName };
   }
 
   async syncFromMeta(organizationId: string, whatsappAccountId: string) {
@@ -176,7 +189,9 @@ export class TemplatesService {
   async delete(organizationId: string, id: string) {
     const template = await this.prisma.template.findFirst({ where: { id, organizationId } });
     if (!template) throw new NotFoundException('Template not found');
-    await this.prisma.template.delete({ where: { id } });
+    const used = await this.prisma.campaign.count({ where: { organizationId, templateId: template.id } });
+    if (used) throw new ConflictException(`This template is used by ${used} campaign${used === 1 ? '' : 's'}. Delete those first.`);
+    await this.prisma.template.delete({ where: { id: template.id } });
   }
 
   async assertApproved(organizationId: string, id: string) {

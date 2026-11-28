@@ -12,7 +12,8 @@ export interface SendTemplateMessageParams {
   to: string;
   templateName: string;
   languageCode: string;
-  components?: TemplateComponent[];
+  /** Built by buildSendComponents in @speediator/types. */
+  components?: ReadonlyArray<object>;
 }
 
 export interface TemplateComponent {
@@ -59,3 +60,10 @@ export interface PhoneNumberDetails {
 }
 
 export type SmbAppDataSyncType = 'smb_app_state_sync' | 'history';
+
+export interface UploadFileParams {
+  accessToken: string;
+  fileName: string;
+  fileType: string;
+  bytes: Uint8Array<ArrayBuffer>;
+}

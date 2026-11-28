@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException, BadGatewayException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappAccountsService } from '../whatsapp-accounts/whatsapp-accounts.service';
-import { whatsAppClient, WhatsAppApiError } from '@speediator/whatsapp';
+import { whatsAppClient } from '@speediator/whatsapp';
+import { rethrowMetaError } from '../common/meta-error';
 import { MessageDirection, MessageStatus } from '@speediator/prisma';
 
 const OPT_OUT_KEYWORDS = /^(stop|unsubscribe|opt\s*out)$/i;
@@ -71,7 +72,7 @@ export class MessagesService {
         to: conversation.contact.phone,
         body,
       })
-      .catch(rethrowMetaError);
+      .catch(rethrowMetaError('WhatsApp rejected the message'));
 
     const metaMessageId = result.messages?.[0]?.id;
 
@@ -134,7 +135,7 @@ export class MessagesService {
         languageCode: template.language,
         components: [],
       })
-      .catch(rethrowMetaError);
+      .catch(rethrowMetaError('WhatsApp rejected the message'));
 
     const sentAt = new Date();
     const message = await this.prisma.message.create({
@@ -189,11 +190,3 @@ export class MessagesService {
 }
 
 /** Shows Meta's reason (e.g. "Re-engagement message") instead of a bare server error. */
-function rethrowMetaError(err: unknown): never {
-  if (err instanceof WhatsAppApiError) {
-    const meta = (err.body as { error?: { message?: string; error_user_msg?: string } }).error;
-    const reason = meta?.error_user_msg ?? meta?.message ?? `HTTP ${err.status}`;
-    throw err.status >= 500 ? new BadGatewayException(`WhatsApp is unavailable: ${reason}`) : new BadRequestException(`WhatsApp rejected the message: ${reason}`);
-  }
-  throw err;
-}

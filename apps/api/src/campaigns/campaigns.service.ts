@@ -8,7 +8,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { CampaignStatus, CampaignContactStatus } from '@speediator/prisma';
-import { audienceWhere, type AudienceFilter } from '@speediator/types';
+import {
+  audienceWhere,
+  parseTemplateVariables,
+  variableProblems,
+  type AudienceFilter,
+  type TemplateVariables,
+} from '@speediator/types';
 
 export const CAMPAIGN_FANOUT_QUEUE = 'campaign-fanout';
 
@@ -37,11 +43,12 @@ export class CampaignsService {
     whatsappAccountId: string;
     templateId: string;
     audienceFilter?: AudienceFilter;
-    variableMap?: object;
+    variableMap?: TemplateVariables;
     scheduledAt?: string;
   }) {
     await this.verifyAccount(organizationId, data.whatsappAccountId);
-    await this.verifyTemplate(organizationId, data.templateId, data.whatsappAccountId);
+    const template = await this.verifyTemplate(organizationId, data.templateId, data.whatsappAccountId);
+    assertVariablesComplete(template.components, data.variableMap ?? { values: {} });
     return this.prisma.campaign.create({
       data: {
         organizationId,
@@ -50,7 +57,7 @@ export class CampaignsService {
         whatsappAccountId: data.whatsappAccountId,
         templateId: data.templateId,
         audienceFilter: data.audienceFilter ?? { mode: 'all' },
-        variableMap: data.variableMap ?? {},
+        variableMap: data.variableMap ?? { values: {} },
         scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : undefined,
       },
     });
@@ -71,7 +78,7 @@ export class CampaignsService {
     const campaign = await this.prisma.campaign.findFirst({
       where: { id, organizationId },
       include: {
-        template: { select: { name: true, language: true, category: true } },
+        template: { select: { name: true, language: true, category: true, components: true } },
         _count: { select: { contacts: true } },
       },
     });
@@ -149,13 +156,14 @@ export class CampaignsService {
   async update(organizationId: string, id: string, data: {
     name?: string;
     audienceFilter?: AudienceFilter;
-    variableMap?: object;
+    variableMap?: TemplateVariables;
     scheduledAt?: string;
   }) {
     const campaign = await this.get(organizationId, id);
     if (campaign.status !== CampaignStatus.DRAFT) {
       throw new BadRequestException('Only draft campaigns can be edited');
     }
+    if (data.variableMap) assertVariablesComplete(campaign.template.components, data.variableMap);
     return this.prisma.campaign.update({
       where: { id },
       data: {
@@ -185,6 +193,8 @@ export class CampaignsService {
     if (!['DRAFT', 'PAUSED'].includes(campaign.status)) {
       throw new BadRequestException('Campaign cannot be launched from its current status');
     }
+    // Campaigns made before variables could be set would fail for every recipient.
+    assertVariablesComplete(campaign.template.components, parseTemplateVariables(campaign.variableMap));
     await this.prisma.campaign.update({
       where: { id },
       data: { status: CampaignStatus.RUNNING, startedAt: new Date() },
@@ -222,5 +232,11 @@ export class CampaignsService {
       throw new BadRequestException('This template belongs to a different WhatsApp number');
     }
     if (template.status !== 'APPROVED') throw new BadRequestException('Only approved templates can be used in campaigns');
+    return template;
   }
+}
+
+function assertVariablesComplete(components: unknown, vars: TemplateVariables) {
+  const problems = variableProblems(components, vars);
+  if (problems.length) throw new BadRequestException(problems.join('. '));
 }

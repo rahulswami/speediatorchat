@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AudiencePicker, type AudienceFilter } from './audience-picker';
+import { VariablesEditor } from './variables-editor';
+import { variableProblems, type TemplateVariables } from '@speediator/types';
 
 interface WhatsappAccount {
   id: string;
@@ -24,6 +26,7 @@ interface Template {
   status: string;
   rejectionReason: string | null;
   whatsappAccountId?: string;
+  components?: unknown;
 }
 
 const selectClass = 'w-full border rounded-md px-3 py-2 text-sm bg-background';
@@ -43,6 +46,7 @@ export default function NewCampaignPage() {
   const [syncNote, setSyncNote] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [variables, setVariables] = useState<TemplateVariables>({ values: {} });
   const [audience, setAudience] = useState<{ filter: AudienceFilter | null; count: number | null }>({
     filter: { mode: 'all' },
     count: null,
@@ -70,6 +74,8 @@ export default function NewCampaignPage() {
     [templates, form.whatsappAccountId],
   );
   const approved = accountTemplates.filter((t) => t.status === 'APPROVED');
+  const selectedTemplate = templates.find((t) => t.id === form.templateId);
+  const problems = selectedTemplate ? variableProblems(selectedTemplate.components, variables) : [];
 
   /** Pulls the latest templates and statuses for this number from Meta. */
   const syncTemplates = useCallback(async (): Promise<Template[] | null> => {
@@ -81,7 +87,9 @@ export default function NewCampaignPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(errorMessage(data, 'Could not sync templates from Meta'));
       const synced = (data.templates as Template[]).map((t) => ({ ...t, whatsappAccountId: form.whatsappAccountId }));
-      setTemplates((all) => [...all.filter((t) => t.whatsappAccountId !== form.whatsappAccountId), ...synced]);
+      // The sync result has no components, so reload the full list for the variable editor.
+      const full = await fetch('/api/templates', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null));
+      if (full) setTemplates(full);
       const count = synced.filter((t) => t.status === 'APPROVED').length;
       setSyncNote(`Synced from Meta: ${count} approved template${count === 1 ? '' : 's'}.`);
       return synced;
@@ -103,6 +111,7 @@ export default function NewCampaignPage() {
     const match = matches.find((t) => t.status === 'APPROVED');
     if (match) {
       setForm((f) => ({ ...f, templateId: match.id }));
+      setVariables({ values: {} });
       setSyncNote(`Found "${match.name}" (${match.language}), approved by Meta.`);
       setTypedName('');
     } else if (matches.length) {
@@ -125,6 +134,7 @@ export default function NewCampaignPage() {
         whatsappAccountId: form.whatsappAccountId,
         templateId: form.templateId,
         audienceFilter: audience.filter,
+        variableMap: variables,
       };
       if (form.scheduledAt) body.scheduledAt = new Date(form.scheduledAt).toISOString();
 
@@ -144,7 +154,7 @@ export default function NewCampaignPage() {
   }
 
   return (
-    <div className="p-6 max-w-lg">
+    <div className="p-6 max-w-xl">
       <h1 className="text-xl font-semibold mb-6">New Campaign</h1>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-1">
@@ -172,6 +182,7 @@ export default function NewCampaignPage() {
               value={form.whatsappAccountId}
               onChange={(e) => {
                 setForm({ ...form, whatsappAccountId: e.target.value, templateId: '' });
+                setVariables({ values: {} });
                 setSyncNote('');
               }}
               className={selectClass}
@@ -205,7 +216,10 @@ export default function NewCampaignPage() {
               id="template"
               required
               value={form.templateId}
-              onChange={(e) => setForm({ ...form, templateId: e.target.value })}
+              onChange={(e) => {
+                setForm({ ...form, templateId: e.target.value });
+                setVariables({ values: {} });
+              }}
               className={selectClass}
             >
               <option value="">
@@ -239,6 +253,18 @@ export default function NewCampaignPage() {
           </div>
         )}
 
+        {selectedTemplate && (
+          <div className="space-y-2">
+            <Label>Message content</Label>
+            <VariablesEditor
+              components={selectedTemplate.components}
+              whatsappAccountId={form.whatsappAccountId}
+              value={variables}
+              onChange={setVariables}
+            />
+          </div>
+        )}
+
         <div className="space-y-2">
           <Label>Who receives it</Label>
           <AudiencePicker onChange={onAudienceChange} />
@@ -253,9 +279,14 @@ export default function NewCampaignPage() {
             onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })}
           />
         </div>
+        {problems.length > 0 && (
+          <ul className="text-xs text-amber-700 list-disc pl-4">
+            {problems.map((p) => <li key={p}>{p}</li>)}
+          </ul>
+        )}
         {error && <p className="text-sm text-destructive">{error}</p>}
         <div className="flex gap-3">
-          <Button type="submit" disabled={loading || !form.templateId || !audience.filter}>
+          <Button type="submit" disabled={loading || !form.templateId || !audience.filter || problems.length > 0}>
             {loading ? 'Creating…' : 'Create campaign'}
           </Button>
           <Button type="button" variant="outline" onClick={() => router.back()}>

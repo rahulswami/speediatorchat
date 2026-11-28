@@ -5,6 +5,7 @@ import {
   Delete,
   Body,
   Param,
+  Headers,
   HttpCode,
   UseGuards,
 } from '@nestjs/common';
@@ -16,6 +17,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequestUser } from '@speediator/types';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
+import { readUploadedFile } from '../common/uploaded-file';
 
 const ConnectAccountSchema = z.object({
   wabaId: z.string().min(1),
@@ -46,6 +48,18 @@ export class WhatsappAccountsController {
   @HttpCode(200)
   async check(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.connectionCheck.check(user.orgId, id);
+  }
+
+  /** Raw file body; see readUploadedFile for the headers it needs. */
+  @Post(':id/media')
+  @HttpCode(200)
+  async uploadMedia(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Headers() headers: Record<string, string>,
+    @Body() body: unknown,
+  ) {
+    return this.service.uploadMedia(user.orgId, id, readUploadedFile(body, headers));
   }
 
   @Get('embedded-signup/config')

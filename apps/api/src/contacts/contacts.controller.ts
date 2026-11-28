@@ -18,8 +18,10 @@ import { RequestUser } from '@speediator/types';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 
 const UpdateContactSchema = z.object({
-  name: z.string().min(1).optional(),
+  // An empty name clears it, so the contact shows by phone number.
+  name: z.string().trim().max(100).transform((v) => v || null).optional(),
   optedIn: z.boolean().optional(),
+  optInSource: z.string().trim().max(200).optional(),
 });
 
 const optInFields = {

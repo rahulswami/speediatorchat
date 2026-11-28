@@ -24,6 +24,7 @@ import { BillingModule } from './billing/billing.module';
 import { ApiKeysModule } from './api-keys/api-keys.module';
 import { OutboundWebhooksModule } from './outbound-webhooks/outbound-webhooks.module';
 import { IntegrationsModule } from './integrations/integrations.module';
+import { OverviewModule } from './overview/overview.module';
 import { LogRedactInterceptor } from './auth/interceptors/log-redact.interceptor';
 
 @Module({
@@ -59,6 +60,7 @@ import { LogRedactInterceptor } from './auth/interceptors/log-redact.interceptor
     ApiKeysModule,
     OutboundWebhooksModule,
     IntegrationsModule,
+    OverviewModule,
   ],
   providers: [{ provide: APP_INTERCEPTOR, useClass: LogRedactInterceptor }],
 })

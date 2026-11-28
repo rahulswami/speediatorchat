@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
+import { ACCESS_COOKIE, REFRESH_COOKIE } from '@/lib/auth-cookies';
 
 export async function POST() {
-  const res = NextResponse.redirect(
-    new URL('/login', process.env.APP_URL ?? 'http://localhost:3000'),
-  );
-  res.cookies.delete('access_token');
-  res.cookies.delete('refresh_token');
+  // A relative Location keeps the browser on whatever host it used. Behind the proxy the
+  // server only sees its internal address, so an absolute URL built here would point there.
+  const res = new NextResponse(null, { status: 303, headers: { Location: '/login' } });
+  res.cookies.delete(ACCESS_COOKIE);
+  res.cookies.delete(REFRESH_COOKIE);
   return res;
 }
