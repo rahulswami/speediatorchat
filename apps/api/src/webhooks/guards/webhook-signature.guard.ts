@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { FastifyRequest } from 'fastify';
+import { webhookApps } from '../meta-apps';
 
 @Injectable()
 export class WebhookSignatureGuard implements CanActivate {
@@ -24,8 +25,8 @@ export class WebhookSignatureGuard implements CanActivate {
       throw new ForbiddenException('Missing webhook signature');
     }
 
-    const appSecret = this.config.get<string>('WHATSAPP_APP_SECRET');
-    if (!appSecret) {
+    const secrets = webhookApps(this.config).map((a) => a.secret);
+    if (!secrets.length) {
       // Without the secret anyone could post fake messages, so production refuses them.
       // Local development may run without one to replay sample payloads.
       if (this.config.get<string>('NODE_ENV') === 'production') {
@@ -44,15 +45,14 @@ export class WebhookSignatureGuard implements CanActivate {
       throw new ForbiddenException('Raw body unavailable for signature verification');
     }
 
-    const expected = `sha256=${createHmac('sha256', appSecret).update(rawBody).digest('hex')}`;
-
-    try {
-      const sigBuf = Buffer.from(signature);
-      const expBuf = Buffer.from(expected);
-      if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
-        throw new ForbiddenException('Invalid webhook signature');
-      }
-    } catch {
+    // Each Meta app signs with its own secret; the request is genuine if any of ours matches.
+    const sigBuf = Buffer.from(signature);
+    const valid = secrets.some((secret) => {
+      const expBuf = Buffer.from(`sha256=${createHmac('sha256', secret).update(rawBody).digest('hex')}`);
+      return sigBuf.length === expBuf.length && timingSafeEqual(sigBuf, expBuf);
+    });
+    if (!valid) {
+      this.logger.warn('Webhook signature matches none of the configured Meta app secrets');
       throw new ForbiddenException('Invalid webhook signature');
     }
 

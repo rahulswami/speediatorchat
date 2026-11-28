@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { decryptToken, WhatsAppApiError, type WhatsAppOnboardingClient } from '@speediator/whatsapp';
 import { PrismaService } from '../prisma/prisma.service';
 import { WHATSAPP_ONBOARDING_CLIENT } from './embedded-signup.service';
+import { webhookAppIds } from '../webhooks/meta-apps';
 
 type CheckClient = Pick<WhatsAppOnboardingClient, 'getPhoneNumber' | 'listSubscribedApps'>;
 
@@ -60,8 +61,8 @@ export class ConnectionCheckService {
 
     try {
       const apps = await this.meta.listSubscribedApps(account.wabaId, accessToken);
-      const appId = this.config.get<string>('META_APP_ID');
-      const subscribed = appId ? apps.some((a) => a.id === appId) : apps.length > 0;
+      const ourIds = webhookAppIds(this.config);
+      const subscribed = ourIds.length ? apps.some((a) => !!a.id && ourIds.includes(a.id)) : apps.length > 0;
       checks.push({
         key: 'webhooks',
         label: 'Incoming messages are routed to Speediator',

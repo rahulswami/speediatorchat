@@ -29,6 +29,19 @@ describe('ConnectionCheckService', () => {
     expect(result.checks[2].at).toBe('2026-11-27T10:00:00.000Z');
   });
 
+  it("counts a client-owned app from WHATSAPP_CLIENT_APPS as routing messages to Speediator", async () => {
+    env.WHATSAPP_CLIENT_APPS = '555:secret';
+    try {
+      const result = await service({
+        getPhoneNumber: async () => ({ id: 'PN' }),
+        listSubscribedApps: async () => [{ id: '555', name: 'Dmaasa app' }],
+      }).check('org', 'acc');
+      expect(result.checks[1]).toMatchObject({ ok: true, detail: 'Subscribed: Dmaasa app' });
+    } finally {
+      delete env.WHATSAPP_CLIENT_APPS;
+    }
+  });
+
   it('explains an expired token and a missing webhook subscription', async () => {
     const expired = new WhatsAppApiError(401, { error: { code: 190, message: 'Session has expired' } });
     const result = await service(

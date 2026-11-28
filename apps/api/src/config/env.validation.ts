@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseClientApps } from '../webhooks/meta-apps';
 
 // docker-compose passes unset variables as empty strings.
 const blankAsUnset = <T extends z.ZodTypeAny>(schema: T) =>
@@ -13,6 +14,10 @@ const EnvSchema = z.object({
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
   WHATSAPP_TOKEN_ENCRYPTION_KEY: z.string().length(64),
   WHATSAPP_APP_SECRET: z.string().optional(),
+  // Client-owned Meta apps that send webhooks to our callback: "appId:appSecret,appId:appSecret".
+  WHATSAPP_CLIENT_APPS: blankAsUnset(
+    z.string().refine((v) => parseClientApps(v) !== null, 'Use appId:appSecret pairs separated by commas').optional(),
+  ),
   WHATSAPP_API_VERSION: z.string().default('v20.0'),
   // App-level token Meta sends when verifying the webhook callback (Embedded Signup routes
   // every customer's webhooks to this one callback).
